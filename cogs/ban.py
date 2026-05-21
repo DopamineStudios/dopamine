@@ -136,7 +136,6 @@ class BanningCog(commands.Cog):
             await interaction.response.send_message(f"⚠️ User `{target_id}` is already banned.", ephemeral=True)
 
     @dopamine_commands.command(name="dgb", description=".", permissions_preset="bot_owner")
-    @app_commands.check(is_dev)
     @app_commands.describe(guild_id="Select a guild to ban", reason="The reason for the ban")
     async def devguildban(self, interaction: discord.Interaction, guild_id: str, reason: str):
         try:
