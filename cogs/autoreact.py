@@ -314,7 +314,7 @@ class EditPage(PrivateLayoutView):
         is_image_only = bool(self.panel['image_only_mode'])
 
         whitelist_count = len(self.cog.whitelist_cache.get((self.panel['guild_id'], self.panel['panel_id']),
-                                                           [])) if is_whitelist else "All users"
+                                                           [])) if is_whitelist else "All"
 
         container = discord.ui.Container()
         container.add_item((discord.ui.TextDisplay(f"Edit: {self.panel['name']}")))
@@ -324,7 +324,7 @@ class EditPage(PrivateLayoutView):
             f"**State:** {'🟢 Active' if is_active else '🔴 Inactive'}\n"
             f"**Emojis:** {self.cog.format_emojis_for_display(self.panel['emoji_list'])}\n"
             f"**Channel:** <#{self.panel['channel_id']}>\n"
-            f"**Target:** {whitelist_count}\n"
+            f"**Target:** {whitelist_count} Members\n"
             f"**Mode:** {'Image-only' if is_image_only else 'All Messages'}\n"
         )
         container.add_item(discord.ui.TextDisplay(details))
