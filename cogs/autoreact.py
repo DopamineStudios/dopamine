@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from dopamineframework import PrivateLayoutView, dopamine_commands
 from config import ARDB_PATH
 from dopamineframework import mod_check
+import emoji
 
 EMOJI_REGEX = re.compile(
     r'(<a?:\w{2,32}:\d{15,25}>)'
@@ -735,6 +736,7 @@ class AutoReact(commands.Cog):
 
     def parse_emoji_input(self, emoji_input: str) -> List[str]:
         if not emoji_input: return []
+        emoji_input = emoji.emojize(emoji_input, language='alias')
         tokens = []
         parts = [p.strip() for p in re.split(r'[,\s]+', emoji_input) if p.strip()]
         for part in parts:
@@ -802,7 +804,8 @@ class AutoReact(commands.Cog):
                 message, em = await self._reaction_queue.get()
                 async with self._reaction_semaphore:
                     try:
-                        await message.add_reaction(em)
+                        cleaned_emoji = emoji.emojize(em, language='alias')
+                        await message.add_reaction(cleaned_emoji)
                     except:
                         pass
                 self._reaction_queue.task_done()
