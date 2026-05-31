@@ -987,7 +987,8 @@ class StickyMessages(commands.Cog):
         except asyncio.CancelledError:
             pass
         finally:
-            self.sticky_tasks.pop(channel.id, None)
+            if self.sticky_tasks.get(channel.id) == asyncio.current_task():
+                self.sticky_tasks.pop(channel.id, None)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
