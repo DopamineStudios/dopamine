@@ -728,18 +728,30 @@ class LayoutViewChannelSelect(PrivateLayoutView):
         channel_id = int(interaction.data['values'][0])
         channel = interaction.guild.get_channel(channel_id) or await interaction.guild.fetch_channel(channel_id)
 
-        if channel is None:
+        if not isinstance(channel, discord.TextChannel):
             return await interaction.response.send_message(
-                "I couldn't access that channel. Check my permissions.", ephemeral=True
+                "The selected item is not a text channel. Please select a valid text channel.",
+                ephemeral=True
             )
 
         embed_obj = self.cog.build_embed_from_row(self.embed_record)
         content = self.embed_record.get("content") or None
 
-        await channel.send(content=content, embed=embed_obj)
-        await interaction.response.send_message(
-            f"Embed sent to {channel.mention} successfully.", ephemeral=True
-        )
+        try:
+            await channel.send(content=content, embed=embed_obj)
+            await interaction.response.send_message(
+                f"Embed sent to {channel.mention} successfully.", ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to send messages in that channel.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"An unexpected error occurred: {e}",
+                ephemeral=True
+            )
 
 
 class EmbedPreviewView(PrivateView):
@@ -836,19 +848,32 @@ class ViewChannelSelect(discord.ui.View):
     async def select_channel(self, interaction: discord.Interaction):
         channel_id = self.select.values[0].id
         ch = self.cog.bot.get_channel(channel_id) or await interaction.guild.fetch_channel(channel_id)
-        if ch is None or not isinstance(ch, discord.abc.Messageable):
+
+        if not isinstance(ch, discord.TextChannel):
             return await interaction.response.send_message(
-                "I can't access that channel or it's not a text channel.",
+                "The selected item is not a text channel.",
                 ephemeral=True
             )
-        embed_obj = self.cog.build_embed_from_draft(self.draft)
-        await ch.send(content=self.draft.content or None, embed=embed_obj)
 
-        await interaction.response.edit_message(
-            content=f"Embed sent to {ch.mention} successfully.",
-            embed=None,
-            view=None,
-        )
+        try:
+            embed_obj = self.cog.build_embed_from_draft(self.draft)
+            await ch.send(content=self.draft.content or None, embed=embed_obj)
+
+            await interaction.response.edit_message(
+                content=f"Embed sent to {ch.mention} successfully.",
+                embed=None,
+                view=None,
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to send messages in that channel.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"An error occurred: {e}",
+                ephemeral=True
+            )
 
 
 class EmbedEditSelect(discord.ui.Select):
