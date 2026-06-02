@@ -7,7 +7,7 @@ from discord.ext import commands, tasks
 from typing import Dict, List, Optional, Set, Tuple
 import re
 from config import NFDB_PATH, DB_PATH
-from dopamineframework import mod_check, dopamine_commands
+from beacon import beacon_commands
 from contextlib import asynccontextmanager
 from utils.log import LoggingManager
 
@@ -465,7 +465,7 @@ class Nickname(commands.Cog):
 
     nickname_group = app_commands.Group(name="nickname", description="Nickname commands")
 
-    moderator_group = dopamine_commands.Group(name="moderator", description="Nickname Moderator commands group", parent=nickname_group, permissions_preset="moderation")
+    moderator_group = beacon_commands.Group(name="moderator", description="Nickname Moderator commands group", parent=nickname_group, permissions_preset="moderation")
 
     @moderator_group.command(name="verify", description="Verify a user's nickname to make them immune to the moderation.")
     async def verify_user(self, interaction: discord.Interaction, member: discord.Member):

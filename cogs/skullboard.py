@@ -8,7 +8,7 @@ from typing import Optional, Dict, Set, Tuple, Any
 import time
 from contextlib import asynccontextmanager
 from config import SKDB_PATH
-from dopamineframework import PrivateLayoutView, dopamine_commands
+from beacon import PrivateLayoutView, beacon_commands
 
 
 class ThresholdModal(discord.ui.Modal, title="Edit Skull Threshold"):
@@ -512,7 +512,7 @@ class SkullboardCog(commands.Cog):
         except:
             pass
 
-    @dopamine_commands.command(name="skullboard", description="Configure the Skullboard via Dashboard", permissions_preset="automation")
+    @beacon_commands.command(name="skullboard", description="Configure the Skullboard via Dashboard", permissions_preset="automation")
     async def skullboard_dashboard(self, interaction: discord.Interaction):
         await self.get_guild_settings(interaction.guild.id)
         view = SkullboardDashboard(interaction.user, self, interaction.guild.id)

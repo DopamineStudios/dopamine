@@ -1,7 +1,8 @@
 import discord
 import importlib
 import config
-import dopamineframework
+from beacon import beacon_commands
+import beacon
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv, set_key
@@ -13,15 +14,12 @@ class Reload(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="rs", description=".")
+    @beacon_commands.command(name="rs", description=".", permissions_preset="bot_owner")
     async def reload(self, interaction: discord.Interaction):
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message("🤫", ephemeral=True)
-            return
 
         load_dotenv(override=True)
         importlib.reload(config)
-        importlib.reload(dopamineframework)
+        importlib.reload(beacon)
 
         await interaction.response.send_message("👍️", ephemeral=True)
 
@@ -32,21 +30,24 @@ class Reload(commands.Cog):
             return
 
         modules_to_purge = [
-            'dopamineframework',
-            'dopamineframework.core',
-            'dopamineframework.core.commands_registry',
-            'dopamineframework.core.dashboard',
-            'dopamineframework.ext',
-            'dopamineframework.ext.diagnostics',
-            'dopamineframework.ext.path',
-            'dopamineframework.ext.pic',
-            'dopamineframework.utils',
-            'dopamineframework.utils.checks',
-            'dopamineframework.utils.log',
-            'dopamineframework.utils.paginator',
-            'dopamineframework.utils.timeparser',
-            'dopamineframework.utils.views',
-            'dopamineframework.bot'
+            'beacon',
+            'beacon.core',
+            'beacon.core.commands_registry',
+            'beacon.core.dashboard',
+            'beacon.core.preconditions',
+            'beacon.core.errors',
+            'beacon.core.beacon_commands',
+            'beacon.ext',
+            'beacon.ext.diagnostics',
+            'beacon.ext.path',
+            'beacon.ext.pic',
+            'beacon.utils',
+            'beacon.utils.checks',
+            'beacon.utils.log',
+            'beacon.utils.paginator',
+            'beacon.utils.timeparser',
+            'beacon.utils.views',
+            'beacon.bot'
         ]
 
         try:
@@ -54,7 +55,7 @@ class Reload(commands.Cog):
                 if module in sys.modules:
                     del sys.modules[module]
 
-            importlib.import_module('dopamineframework')
+            importlib.import_module('beacon')
             load_dotenv(override=True)
             importlib.reload(config)
             await ctx.send("👍️")

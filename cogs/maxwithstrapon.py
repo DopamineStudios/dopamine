@@ -5,7 +5,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from config import MAX_PATH, FONT_PATH
 from typing import Optional
-from dopamineframework import dopamine_commands
+from beacon import beacon_commands
 
 class MaxWithStrapOn(commands.Cog):
     def __init__(self, bot):
@@ -70,12 +70,12 @@ class MaxWithStrapOn(commands.Cog):
             return True
         return await voter_cog.check_vote_access(user_id)
 
-    @dopamine_commands.command(
+    @beacon_commands.command(
         name="maxwithstrapon",
         description="Ignore the command's name - This command turns anyone into Max Verstappen!", cooldown=(1, 5)
     )
     @app_commands.describe(user="User to insert into the image")
-    @dopamine_commands.allowed_contexts(discord.app_commands.AppCommandContext.guild, discord.app_commands.AppCommandContext.private_channel, discord.app_commands.AppCommandContext.dm_channel)
+    @beacon_commands.allowed_contexts(discord.app_commands.AppCommandContext.guild, discord.app_commands.AppCommandContext.private_channel, discord.app_commands.AppCommandContext.dm_channel)
     async def maxwithstrapon(
         self,
         interaction: discord.Interaction,

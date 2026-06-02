@@ -7,9 +7,8 @@ import time
 import re
 from typing import Optional, List, Dict, Tuple, Set, Any
 from contextlib import asynccontextmanager
-from dopamineframework import PrivateLayoutView, dopamine_commands
+from beacon import PrivateLayoutView, beacon_commands
 from config import ARDB_PATH
-from dopamineframework import mod_check
 import emoji
 
 EMOJI_REGEX = re.compile(
@@ -775,7 +774,7 @@ class AutoReact(commands.Cog):
         self.panel_cache.pop(key, None)
         self.whitelist_cache.pop(key, None)
 
-    @dopamine_commands.command(name="autoreact", description="Manage AutoReact panels via dashboard", permissions_preset="automations")
+    @beacon_commands.command(name="autoreact", description="Manage AutoReact panels via dashboard", permissions_preset="automations")
     async def autoreact_dashboard_cmd(self, interaction: discord.Interaction):
         view = AutoreactDashboard(interaction.user, self)
         await interaction.response.send_message(view=view)

@@ -6,7 +6,7 @@ import asyncio
 import datetime
 import time
 from config import SPDB_PATH
-from dopamineframework import PrivateLayoutView, dopamine_commands, preconditions
+from beacon import PrivateLayoutView, beacon_commands, preconditions
 
 class ConfirmationView(PrivateLayoutView):
     def __init__(self, user, cog, title_text: str, body_text: str):
@@ -148,7 +148,7 @@ class SelfPurge(commands.Cog):
         self.purge_scheduler.cancel()
         await self.db.close()
 
-    purge_group = dopamine_commands.Group(name="selfpurge", description="Manage self-message purges.")
+    purge_group = beacon_commands.Group(name="selfpurge", description="Manage self-message purges.")
 
     @purge_group.command(name="disable", description="Disable self-purges for the server.")
     @preconditions.has_permissions(manage_messages=True)

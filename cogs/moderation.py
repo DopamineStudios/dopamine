@@ -9,9 +9,8 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Any, Union
 from contextlib import asynccontextmanager
 from config import DB_PATH
-from dopamineframework import mod_check
 from utils.log import LoggingManager
-from dopamineframework import PrivateLayoutView, dopamine_commands
+from beacon import PrivateLayoutView, beacon_commands
 
 
 def parse_duration(duration_str: str) -> Optional[int]:
@@ -1361,7 +1360,7 @@ class Points(commands.Cog):
 
             await db.commit()
 
-    mod_group = dopamine_commands.Group(name="moderation", description="Moderation system settings", permissions_preset="moderation")
+    mod_group = beacon_commands.Group(name="moderation", description="Moderation system settings", permissions_preset="moderation")
 
     @mod_group.command(name="dashboard", description="Open the moderation dashboard.")
     async def moderation_dashboard(self, interaction: discord.Interaction):
@@ -1375,7 +1374,7 @@ class Points(commands.Cog):
         await self.apply_default_actions(interaction.guild.id)
         await interaction.response.send_message(view=ModerationDashboard(interaction.user, self))
 
-    @dopamine_commands.command(name="point", description="Add points to a user.", permissions_preset="moderation")
+    @beacon_commands.command(name="point", description="Add points to a user.", permissions_preset="moderation")
     @app_commands.describe(delete_messages="Delete the user's messages across all channels (up to 14 days old).")
     async def point(self, interaction: discord.Interaction, member: discord.Member, amount: int,
                     reason: Optional[str] = None, delete_messages: bool = False):
@@ -1387,7 +1386,7 @@ class Points(commands.Cog):
 
         await self._add_infraction(interaction, member, amount, reason, delete_messages)
 
-    @dopamine_commands.command(name="warn", description="Issue a warning (Add 1 or more warnings to user).", permissions_preset="moderation")
+    @beacon_commands.command(name="warn", description="Issue a warning (Add 1 or more warnings to user).", permissions_preset="moderation")
     @app_commands.describe(delete_messages="Delete the user's messages across all channels (up to 14 days old).")
     async def warn(self, interaction: discord.Interaction, member: discord.Member, amount: int = 1, reason: Optional[str] = None,
                    delete_messages: bool = False):
@@ -1448,7 +1447,7 @@ class Points(commands.Cog):
         await interaction.edit_original_response(embed=embed, view=None)
         await self.apply_punishment(interaction, member, new_points, reason)
 
-    @dopamine_commands.command(name="pardon", description="Remove points/warnings from a user.", permissions_preset="moderation")
+    @beacon_commands.command(name="pardon", description="Remove points/warnings from a user.", permissions_preset="moderation")
     async def pardon(self, interaction: discord.Interaction, member: discord.Member, amount: int,
                      reason: Optional[str] = None):
         await self.guild_setup(interaction)
@@ -1480,7 +1479,7 @@ class Points(commands.Cog):
                 log_embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
                 await log_ch.send(embed=log_embed)
 
-    @dopamine_commands.command(name="unban", description="Unban a user.", permissions_preset="moderation")
+    @beacon_commands.command(name="unban", description="Unban a user.", permissions_preset="moderation")
     async def unban(self, interaction: discord.Interaction, user: discord.User, reason: Optional[str] = None):
         await self.guild_setup(interaction)
         try:
@@ -1512,7 +1511,7 @@ class Points(commands.Cog):
                 log_embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
                 await log_ch.send(embed=log_embed)
 
-    @dopamine_commands.command(name="points", description="Show points info.", permissions_preset="moderation")
+    @beacon_commands.command(name="points", description="Show points info.", permissions_preset="moderation")
     async def points_lookup(self, interaction: discord.Interaction, user: discord.User):
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})
@@ -1521,7 +1520,7 @@ class Points(commands.Cog):
                                                            ephemeral=True)
         await self._show_info(interaction, user, "Points")
 
-    @dopamine_commands.command(name="warnings", description="Show warnings info.", permissions_preset="moderation")
+    @beacon_commands.command(name="warnings", description="Show warnings info.", permissions_preset="moderation")
     async def warnings_lookup(self, interaction: discord.Interaction, user: discord.User):
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})

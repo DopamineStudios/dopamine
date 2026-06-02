@@ -9,7 +9,7 @@ import asyncio
 import aiosqlite
 from datetime import datetime, timezone
 from discord.ui import TextDisplay
-from dopamineframework import PrivateLayoutView, PrivateView, mod_check, dopamine_commands
+from beacon import PrivateLayoutView, PrivateView, beacon_commands
 
 from config import GDB_PATH
 from utils.time import get_duration_to_seconds, get_now_plus_seconds_unix
@@ -2168,7 +2168,7 @@ class Giveaways(commands.Cog):
 
         return choices[:25]
 
-    giveaway = dopamine_commands.Group(name="giveaway", description="Commands for Dopamine's giveaway features.", permissions_preset="giveaways")
+    giveaway = beacon_commands.Group(name="giveaway", description="Commands for Dopamine's giveaway features.", permissions_preset="giveaways")
 
     @giveaway.command(name="create", description="Start the giveaway creation process.")
     async def create(self, interaction: discord.Interaction):
@@ -2180,7 +2180,7 @@ class Giveaways(commands.Cog):
         view = TemplateHomepage(self, interaction.user)
         await interaction.response.send_message(view=view)
 
-    @dopamine_commands.command(name="zr", description=".", permissions_preset="bot_owner")
+    @beacon_commands.command(name="zr", description=".", permissions_preset="bot_owner")
     async def set_review_channel(self, interaction: discord.Interaction):
         async with self.acquire_db() as db:
             await db.execute("INSERT OR REPLACE INTO review_config (guild_id, channel_id) VALUES (?, ?)",

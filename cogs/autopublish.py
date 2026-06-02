@@ -8,7 +8,7 @@ from typing import List, Set
 
 from config import APDB_PATH
 
-from dopamineframework import dopamine_commands
+from beacon import beacon_commands
 
 
 class ConnectionPool:
@@ -85,7 +85,7 @@ class AutoPublish(commands.Cog):
             except discord.HTTPException as e:
                 print(f"Failed to publish message: {e}")
 
-    autopublish_group = dopamine_commands.Group(name="autopublish",
+    autopublish_group = beacon_commands.Group(name="autopublish",
                                            description="Manage auto-publishing for announcement channels.")
 
     @autopublish_group.command(name="enable", description="Enable auto-publishing for a specific channel.")

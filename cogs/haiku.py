@@ -14,7 +14,7 @@ import syllapy
 import inflect
 
 from config import HDDB_PATH, HWDDB_PATH
-from dopamineframework import mod_check, dopamine_commands
+from beacon import beacon_commands
 
 
 class HaikuDetector(commands.Cog):
@@ -357,7 +357,7 @@ class HaikuDetector(commands.Cog):
         await self.haiku_queue.put(message)
 
     haiku_group = app_commands.Group(name="haiku", description="Haiku detection commands")
-    detection_group = dopamine_commands.Group(name="detection", description="Haiku detection settings", parent=haiku_group, permissions_preset="automation")
+    detection_group = beacon_commands.Group(name="detection", description="Haiku detection settings", parent=haiku_group, permissions_preset="automation")
 
     @detection_group.command(name="enable", description="Enable haiku detection for the whole server")
     async def enable_haiku_detection(self, interaction: discord.Interaction):

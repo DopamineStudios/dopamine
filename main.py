@@ -4,7 +4,7 @@ import asyncio
 import discord
 from config import TOKEN, LOGGING_DEBUG_MODE
 from logging.handlers import RotatingFileHandler
-from dopamineframework import Bot
+from beacon import Bot
 import traceback
 
 if not TOKEN:

@@ -7,9 +7,9 @@ import aiohttp
 import io
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView
 from config import LEDB_PATH, LEAVECARD_PATH, BOLDFONT_PATH, MEDIUMFONT_PATH
-from dopamineframework import mod_check, dopamine_commands
+from beacon import beacon_commands
 import re
 import pyvips
 import ctypes
@@ -638,7 +638,7 @@ class Leaves(commands.Cog):
         except Exception as e:
             print(f"Error sending leave message: {e}")
 
-    @dopamine_commands.command(name="goodbye", description="Open the leave/goodbye feature dashboard.", permissions_preset="automation")
+    @beacon_commands.command(name="goodbye", description="Open the leave/goodbye feature dashboard.", permissions_preset="automation")
     async def leave_dashboard(self, interaction: discord.Interaction):
         await interaction.response.send_message(
             view=LeaveDashboardView(self, interaction.guild.id, interaction.user)

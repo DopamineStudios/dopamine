@@ -9,7 +9,7 @@ import json
 import discord
 from discord import app_commands, Interaction, TextChannel
 from discord.ext import commands, tasks
-from dopamineframework import mod_check, dopamine_commands
+from beacon import beacon_commands
 
 from config import DDB_PATH, WORDS_PATH
 
@@ -202,9 +202,9 @@ class DailyWords(commands.Cog):
 
     daily = app_commands.Group(name="daily", description="Daily automated messages.")
 
-    words_group = dopamine_commands.Group(name="words", description="Daily word commands", parent=daily, permissions_preset="automation")
+    words_group = beacon_commands.Group(name="words", description="Daily word commands", parent=daily, permissions_preset="automation")
 
-    cat_group = dopamine_commands.Group(name="cat", description="Daily cat image commands", parent=daily, permissions_preset="automation")
+    cat_group = beacon_commands.Group(name="cat", description="Daily cat image commands", parent=daily, permissions_preset="automation")
 
     @words_group.command(name="start", description="Start daily word messages in a channel.")
     @app_commands.describe(
@@ -227,7 +227,6 @@ class DailyWords(commands.Cog):
         )
 
     @words_group.command(name="stop", description="Stop daily word messages in a channel.")
-    @app_commands.check(mod_check)
     @app_commands.describe(
         channel="The channel where you want the daily word to be stopped (defaults to current channel).")
     async def daily_words_stop(self, interaction: Interaction, channel: discord.TextChannel = None):
@@ -243,7 +242,6 @@ class DailyWords(commands.Cog):
         await interaction.response.send_message(content="Daily words stopped.")
 
     @cat_group.command(name="start", description="Start daily cat pics in a channel.")
-    @app_commands.check(mod_check)
     @app_commands.describe(
         channel="The channel where you want the daily cat image to be posted (defaults to current channel).")
     async def daily_cat_start(self, interaction: Interaction, channel: discord.TextChannel = None):
@@ -264,7 +262,6 @@ class DailyWords(commands.Cog):
         )
 
     @cat_group.command(name="stop", description="Stop daily cat pics in a channel.")
-    @app_commands.check(mod_check)
     @app_commands.describe(
         channel="The channel where you want the daily cat image to be stopped (defaults to current channel).")
     async def daily_cat_stop(self, interaction: Interaction, channel: discord.TextChannel = None):

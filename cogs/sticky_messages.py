@@ -7,9 +7,9 @@ import json
 from typing import Optional, Dict, List, Any
 import time
 from contextlib import asynccontextmanager
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView
 from config import STICKYDB_PATH
-from dopamineframework import mod_check, dopamine_commands
+from beacon import beacon_commands
 from cogs.embed import UseEmbedPage
 
 
@@ -1089,7 +1089,7 @@ class StickyMessages(commands.Cog):
             if channel and channel.last_message_id != panel.get('last_message_id'):
                 await self.update_sticky_message(panel, channel)
 
-    sticky_group = dopamine_commands.Group(name="sticky", description="Sticky message commands", permissions_preset="automation")
+    sticky_group = beacon_commands.Group(name="sticky", description="Sticky message commands", permissions_preset="automation")
 
     @sticky_group.command(name="message", description="Open the Sticky Message Dashboard")
     async def sticky_dashboard(self, interaction: discord.Interaction):

@@ -12,7 +12,7 @@ from discord.ext import commands
 from rapidfuzz import fuzz
 
 from config import ARSPDB_PATH
-from dopamineframework import PrivateLayoutView, mod_check, dopamine_commands
+from beacon import PrivateLayoutView, beacon_commands
 from cogs.embed import UseEmbedPage
 import re
 
@@ -1193,8 +1193,7 @@ class Autoresponse(commands.Cog):
             except Exception:
                 continue
 
-    @dopamine_commands.command(name="autoresponse", description="Open the Autoresponse Dashboard", permissions_preset="automation")
-    @app_commands.check(mod_check)
+    @beacon_commands.command(name="autoresponse", description="Open the Autoresponse Dashboard", permissions_preset="automation")
     async def autoresponse_dashboard(self, interaction: discord.Interaction):
         view = AutoresponseDashboard(interaction.user, self, interaction.guild.id)
         await interaction.response.send_message(view=view)

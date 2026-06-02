@@ -10,7 +10,7 @@ import aiohttp
 import pyvips
 import time
 import random
-from dopamineframework import dopamine_commands
+from beacon import beacon_commands
 from config import DP_PATH
 
 PERM_STORAGE_CHANNEL_ID = 1476933186461106187
@@ -465,7 +465,7 @@ class DiscordPhone(commands.Cog):
             except discord.Forbidden:
                 pass
 
-    dp_group = dopamine_commands.Group(name="discordphone", description="Discordphone core commands")
+    dp_group = beacon_commands.Group(name="discordphone", description="Discordphone core commands")
 
     @dp_group.command(name="start", description="Start a DiscordPhone call")
     async def start(self, interaction: discord.Interaction):
@@ -667,7 +667,7 @@ class DiscordPhone(commands.Cog):
             if log_chan:
                 await log_chan.send(embed=embed, file=file, view=ReportView())
 
-    @dopamine_commands.command(name="zt", description=".", permissions_preset="bot_owner")
+    @beacon_commands.command(name="zt", description=".", permissions_preset="bot_owner")
     async def zt_command(self, interaction: discord.Interaction):
         self.settings_cache["log_channel"] = interaction.channel.id
 

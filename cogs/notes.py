@@ -7,7 +7,7 @@ import asyncio
 from typing import Optional, Dict, List, Any
 from contextlib import asynccontextmanager
 from config import NOTEDB_PATH
-from dopamineframework import ViewPaginator, preconditions
+from beacon import ViewPaginator, preconditions
 
 note_group = app_commands.Group(name="note", description="Note management commands")
 

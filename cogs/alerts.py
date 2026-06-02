@@ -12,7 +12,7 @@ from discord.ext import commands
 
 from config import ALERTDB_PATH
 
-from dopamineframework import dopamine_commands
+from beacon import beacon_commands
 
 
 @dataclass
@@ -165,11 +165,11 @@ class Alerts(commands.Cog):
 
             await interaction.response.send_message("Alert pushed and cache synced successfully!", ephemeral=True)
 
-    @dopamine_commands.command(name="pa", description=".", permissions_preset="bot_owner")
+    @beacon_commands.command(name="pa", description=".", permissions_preset="bot_owner")
     async def push_alert(self, interaction: discord.Interaction):
         await interaction.response.send_modal(self.PushAlertModal(self))
 
-    @dopamine_commands.command(name="alert", description="Read the latest alert from the developer.")
+    @beacon_commands.command(name="alert", description="Read the latest alert from the developer.")
     async def alert(self, interaction: discord.Interaction):
         if not self._current_alert:
             embed = discord.Embed(

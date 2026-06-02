@@ -8,10 +8,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
 import pytz
 import re
-from dopamineframework import PrivateLayoutView, dopamine_commands, preconditions
+from beacon import PrivateLayoutView, beacon_commands, preconditions
 
 from config import SSDB_PATH
-from dopamineframework import mod_check
 
 SLOWMODE_INTERVALS = {
     "5 seconds": 5, "10 seconds": 10, "15 seconds": 15, "30 seconds": 30,
@@ -228,7 +227,7 @@ class ScheduledSlowmode(commands.Cog):
 
 
     slowmode_group = app_commands.Group(name="slowmode", description="Manage scheduled slowmode")
-    schedule_group = dopamine_commands.Group(name="schedule", description="Configure slowmode schedules",
+    schedule_group = beacon_commands.Group(name="schedule", description="Configure slowmode schedules",
                                         parent=slowmode_group, permissions_preset="manager")
 
     @slowmode_group.command(name="configure", description="Directly configure slowmode for a channel.")

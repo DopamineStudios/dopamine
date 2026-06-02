@@ -2,9 +2,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from utils.log import LoggingManager
-from dopamineframework import mod_check
 from discord.ui import Button, View, TextDisplay
-from dopamineframework import PrivateLayoutView, dopamine_commands
+from beacon import PrivateLayoutView, beacon_commands
 
 
 class DestructiveConfirmationView(PrivateLayoutView):
@@ -78,7 +77,7 @@ class Logging(commands.Cog):
         if self.manager:
             await self.manager.close_pools()
 
-    log = dopamine_commands.Group(name="logging", description="Manage logging feature.", permissions_preset="security")
+    log = beacon_commands.Group(name="logging", description="Manage logging feature.", permissions_preset="security")
     @log.command(name="set", description="Set the logging channel for logs.")
     @app_commands.describe(channel="Channel to use for logs")
     async def setlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
