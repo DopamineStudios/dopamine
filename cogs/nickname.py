@@ -254,16 +254,25 @@ class Nickname(commands.Cog):
                     temp_cache[guild_id].add(user_id)
         self.verifiedcache = temp_cache
 
-    def isbadname(self, name: str, guild: discord.Guild, member_id: int) -> bool:
+    async def isbadname(self, name: str, guild: discord.Guild, member_id: int) -> bool:
         settings = self.serversettingscache.get(guild.id)
         if not settings:
             return False
+
         verified = self.verifiedcache.get(guild.id, set())
         if member_id in verified:
             return False
-        member = guild.get_member(member_id) or guild.fetch_member(member_id)
+
+        member = guild.get_member(member_id)
+        if not member:
+            try:
+                member = await guild.fetch_member(member_id)
+            except discord.NotFound:
+                return False
+
         if not member:
             return False
+
         if member.top_role >= guild.me.top_role or member == guild.owner:
             return False
 
@@ -425,7 +434,7 @@ class Nickname(commands.Cog):
 
         guild = after.guild
         user_id = after.id
-        trigger_reason = self.isbadname(after.display_name, guild, user_id)
+        trigger_reason = await self.isbadname(after.display_name, guild, user_id)
         if trigger_reason:
             settings = self.serversettingscache.get(after.guild.id, {})
             placeholder = settings.get("placeholder", "Change your nickname")
@@ -448,7 +457,7 @@ class Nickname(commands.Cog):
         guild_id = member.guild.id
         user_id = member.id
 
-        trigger_reason = self.isbadname(member.display_name, guild, user_id)
+        trigger_reason = await self.isbadname(member.display_name, guild, user_id)
 
         if trigger_reason:
             settings = self.serversettingscache.get(guild_id, {})
@@ -630,7 +639,7 @@ class Nickname(commands.Cog):
         async for member in interaction.guild.fetch_members(limit=None):
             if member.bot: continue
 
-            reason = self.isbadname(member.display_name, guild, member.id)
+            reason = await self.isbadname(member.display_name, guild, member.id)
             if reason:
                 try:
                     old_name = member.display_name
