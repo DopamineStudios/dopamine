@@ -442,7 +442,7 @@ class Nickname(commands.Cog):
             try:
                 old_name = after.display_name
                 reason = trigger_reason
-                await after.edit(nick=placeholder, reason=f"Dopamine: {trigger_reason}")
+                await after.edit(nick=placeholder, reason=f"Dopamine Nickname Moderator Feature - Automatic Trigger upon Member Join: {trigger_reason}")
 
                 await self.log_nickname_reset(after, old_name, reason)
             except (discord.Forbidden, discord.HTTPException):
@@ -466,7 +466,7 @@ class Nickname(commands.Cog):
             try:
                 old_name = member.display_name
                 reason = trigger_reason
-                await member.edit(nick=placeholder, reason=f"Dopamine: {trigger_reason}")
+                await member.edit(nick=placeholder, reason=f"Dopamine's Nickname Moderator Feature - Automatic Trigger upon Member Join: {trigger_reason}")
 
                 await self.log_nickname_reset(member, old_name, reason)
             except (discord.Forbidden, discord.HTTPException):
@@ -643,7 +643,7 @@ class Nickname(commands.Cog):
             if reason:
                 try:
                     old_name = member.display_name
-                    await member.edit(nick=placeholder, reason=f"Dopamine Scan: {reason}")
+                    await member.edit(nick=placeholder, reason=f"Dopamine's Nickname Moderator Feature - Manual Scan triggered by {interaction.user.display_name}: {reason}")
                     await self.log_nickname_reset(member, old_name, f"Force Scan: {reason}")
                     count += 1
                     await asyncio.sleep(0.2)
