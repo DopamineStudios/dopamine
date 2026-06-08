@@ -221,7 +221,7 @@ class SettingValueModal(discord.ui.Modal):
         if setting_key == "decay_interval":
             self.value_input = discord.ui.TextInput(
                 label="Frequency (e.g. 14 days, 2 weeks)",
-                placeholder="0 to disable. Min 3 days.",
+                placeholder="0 to disable. Min 1 day / 24 hours.",
             )
         else:
             self.value_input = discord.ui.TextInput(
@@ -242,9 +242,9 @@ class SettingValueModal(discord.ui.Modal):
                 if not seconds:
                     return await interaction.response.send_message("Invalid duration.", ephemeral=True)
                 days = seconds // 86400
-                if days < 3 or days > 100:
+                if days < 1 or days > 100:
                     return await interaction.response.send_message(
-                        "Decay must be between 3 and 100 days (or 0 to disable).", ephemeral=True)
+                        "Decay must be between 1 and 100 days (or 0 to disable decay feature).", ephemeral=True)
                 final_val = days
         elif self.setting_key == "rejoin_points":
             if val == "preserve":
