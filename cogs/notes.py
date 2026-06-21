@@ -155,10 +155,12 @@ class Notes(commands.Cog):
                 self.cog.notes_cache[user_id][new_name] = new_content
 
                 embed = discord.Embed(
-                    title="Note Updated Successfully",
-                    description=f"**New Note Title:** {new_name}\n\n**New Note Content:** {new_content}",
+                    title=f"{new_name}",
+                    description=f"{new_content}",
                     color=discord.Colour.green()
                 )
+                embed.set_footer(text=f"To see it, use /note get {new_name}.")
+                embed.set_author(name="Note Updated Successfully")
                 await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
