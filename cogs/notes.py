@@ -212,7 +212,8 @@ class Notes(commands.Cog):
                     description=content,
                     color=discord.Color.green()
                 )
-                embed.set_footer(text="Note has been saved successfully! To retrieve it, use /note fetch <name>.")
+                embed.set_footer(text=f"To see it, use /note get {name}.")
+                embed.set_author(name="Note Created Successfully")
                 await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
