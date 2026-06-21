@@ -1,6 +1,6 @@
 aiosqlite==0.22.1
 discord.py==2.6.4
-discord-beacon==3.1.0
+discord-beacon==3.2.6
 psutil==7.2.2
 pillow==12.1.1
 pronouncing==0.2.0
