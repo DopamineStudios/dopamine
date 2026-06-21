@@ -90,6 +90,37 @@ def apply_variables(text: str, message: discord.Message) -> str:
         text = text.replace(key, value)
     return text
 
+class GoToPageModal(discord.ui.Modal):
+    def __init__(self, current_page: int, total_pages: int, parent_view: "ManageAutoresponsePage"):
+        super().__init__(title="Go to Page")
+        self.total_pages = total_pages
+        self.parent_view = parent_view
+
+        self.page_input = discord.ui.TextInput(
+            label=f"Enter Page Number (1-{total_pages})",
+            default=str(current_page),
+            required=True,
+            max_length=5,
+        )
+        self.add_item(self.page_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            target_page = int(self.page_input.value)
+            if not 1 <= target_page <= self.total_pages:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message(
+                f"Please enter a valid whole number between 1 and {self.total_pages}.",
+                ephemeral=True
+            )
+            return
+
+        self.parent_view.page = target_page
+        self.parent_view.autoresponses = self.parent_view.cog.get_guild_autoresponses(self.parent_view.guild_id)
+        self.parent_view.build_layout()
+        await interaction.response.edit_message(view=self.parent_view)
+
 class DestructiveConfirmationView(PrivateLayoutView):
     def __init__(self, user, record_id, cog, guild_id):
         super().__init__(user, timeout=30)
@@ -241,6 +272,7 @@ class ManageAutoresponsePage(PrivateLayoutView):
 
             nav_row = discord.ui.ActionRow()
             left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
+            goto_btn = discord.ui.Button(label=f"Page {self.page}", style=discord.ButtonStyle.secondary)
             right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= total_pages))
 
             async def prev_page(interaction: discord.Interaction):
@@ -255,9 +287,15 @@ class ManageAutoresponsePage(PrivateLayoutView):
                 self.build_layout()
                 await interaction.response.edit_message(view=self)
 
+            async def goto_page_callback(interaction: discord.Interaction):
+                modal = GoToPageModal(current_page=self.page, total_pages=total_pages, parent_view=self)
+                await interaction.response.send_modal(modal)
+
             left_btn.callback = prev_page
+            goto_btn.callback = goto_page_callback
             right_btn.callback = next_page
             nav_row.add_item(left_btn)
+            nav_row.add_item(goto_btn)
             nav_row.add_item(right_btn)
             container.add_item(nav_row)
 
