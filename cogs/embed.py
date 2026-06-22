@@ -315,14 +315,12 @@ class EmbedDashboard(PrivateLayoutView):
     async def create_callback(self, interaction: discord.Interaction):
         draft = EmbedDraft(guild_id=interaction.guild.id)
         embed = self.cog.build_embed_from_draft(draft)
-        view = EmbedPreviewView(self.cog, self.user, draft)
 
-        expires = get_now_plus_seconds_unix(1800)
+        expires_ts = get_now_plus_seconds_unix(1800)
+        view = EmbedPreviewView(self.cog, self.user, draft, expires_ts=expires_ts)
+
         await interaction.response.send_message(
-            content=(
-                "This is a preview of your embed. Configure it using the buttons below, then save it.\n"
-                f"This preview expires **<t:{expires}:R>**!"
-            ),
+            content=view.get_formatted_content(),
             embed=embed,
             view=view,
         )
@@ -479,14 +477,13 @@ class ManageEmbedPage(PrivateLayoutView):
                 draft = self.cog.build_draft_from_row(record)
                 preview_embed = self.cog.build_embed_from_draft(draft)
 
-                view = EmbedPreviewView(self.cog, self.user, draft, existing_id=embed_id, parent_view=self)
-                expires = get_now_plus_seconds_unix(1800)
+
+                expires_ts = get_now_plus_seconds_unix(1800)
+                view = EmbedPreviewView(self.cog, self.user, draft, existing_id=embed_id, parent_view=self,
+                                        expires_ts=expires_ts)
 
                 await interaction.response.send_message(
-                    content=(
-                        "This is a preview of your embed. Configure it using the buttons below, then save it.\n"
-                        f"This preview expires **<t:{expires}:R>**!"
-                    ),
+                    content=view.get_formatted_content(),
                     embed=preview_embed,
                     view=view,
                 )
@@ -761,13 +758,24 @@ class EmbedPreviewView(PrivateView):
             draft: EmbedDraft,
             existing_id: Optional[int] = None,
             parent_view: Optional[ManageEmbedPage] = None,
+            expires_ts: int = 0,
     ):
         super().__init__(user, timeout=1800)
         self.cog = cog
         self.draft = draft
         self.existing_id = existing_id
         self.parent_view = parent_view
+        self.expires_ts = expires_ts
         self.message: Optional[discord.Message] = None
+
+    def get_formatted_content(self) -> str:
+        prefix = (
+            "This is a preview of your embed. Configure it using the buttons below, then save and/or send it.\n"
+            f"This preview expires **<t:{self.expires_ts}:R>**!"
+        )
+        if self.draft.content:
+            return f"{prefix}\n\n{self.draft.content}"
+        return prefix
 
     async def _update_parent_cache(self):
         if self.parent_view and self.existing_id:
@@ -957,8 +965,10 @@ class EmbedEditSelect(discord.ui.Select):
         if value == "timestamp":
             self.draft.timestamp_enabled = not self.draft.timestamp_enabled
             new_embed = self.cog.build_embed_from_draft(self.draft)
+
             await self.parent_view.message.edit(
-                content=self.draft.content or None, embed=new_embed
+                content=self.parent_view.get_formatted_content(),
+                embed=new_embed
             )
             state = "enabled" if self.draft.timestamp_enabled else "disabled"
             return await interaction.response.send_message(
@@ -1061,8 +1071,9 @@ class EmbedFieldModal(discord.ui.Modal):
             self.draft.author_icon_url = value
 
         new_embed = self.parent_view.cog.build_embed_from_draft(self.draft)
+
         await self.parent_view.message.edit(
-            content=self.draft.content or None,
+            content=self.parent_view.get_formatted_content(),
             embed=new_embed,
         )
 
