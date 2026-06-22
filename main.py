@@ -43,7 +43,8 @@ intents.reactions = True
 bot = Bot(
     command_prefix="!!",
     cogs_path="cogs",
-    default_diagnostics=False,
+    version_file="VERSION.py",
+    accent_colour=discord.Colour(0x944ae8),
     minimal_cacheing=True,
     intents=intents
 )
