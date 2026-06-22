@@ -468,8 +468,6 @@ class ManageEmbedPage(PrivateLayoutView):
         async def callback(interaction: discord.Interaction):
             embed_id = record["id"]
             if self.delete_mode:
-
-
                 await self.cog.delete_embed(self.guild_id, embed_id)
                 self.embeds = [e for e in self.embeds if e["id"] != embed_id]
                 new_total = len(self.embeds)
@@ -480,7 +478,8 @@ class ManageEmbedPage(PrivateLayoutView):
             else:
                 draft = self.cog.build_draft_from_row(record)
                 preview_embed = self.cog.build_embed_from_draft(draft)
-                view = EmbedPreviewView(self.cog, self.user, draft, existing_id=embed_id)
+
+                view = EmbedPreviewView(self.cog, self.user, draft, existing_id=embed_id, parent_view=self)
                 expires = get_now_plus_seconds_unix(1800)
 
                 await interaction.response.send_message(
@@ -756,29 +755,25 @@ class LayoutViewChannelSelect(PrivateLayoutView):
 
 class EmbedPreviewView(PrivateView):
     def __init__(
-        self,
-        cog: Embeds,
-        user: discord.abc.User,
-        draft: EmbedDraft,
-        existing_id: Optional[int] = None,
+            self,
+            cog: Embeds,
+            user: discord.abc.User,
+            draft: EmbedDraft,
+            existing_id: Optional[int] = None,
+            parent_view: Optional[ManageEmbedPage] = None,
     ):
         super().__init__(user, timeout=1800)
         self.cog = cog
         self.draft = draft
         self.existing_id = existing_id
+        self.parent_view = parent_view
         self.message: Optional[discord.Message] = None
 
-    async def on_timeout(self):
-        if self.message:
-            try:
-                expired_embed = discord.Embed(
-                    title="Embed preview expired",
-                    description="This embed preview has expired.",
-                    colour=discord.Colour.red(),
-                )
-                await self.message.edit(content=None, embed=expired_embed, view=None)
-            except discord.HTTPException:
-                pass
+    async def _update_parent_cache(self):
+        if self.parent_view and self.existing_id:
+            updated_embeds = await self.cog.fetch_embeds_for_guild(self.parent_view.guild_id)
+            self.parent_view.embeds = updated_embeds
+            self.parent_view.build_layout()
 
     @discord.ui.button(label="Save", style=discord.ButtonStyle.green)
     async def save_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -789,6 +784,9 @@ class EmbedPreviewView(PrivateView):
             existing_id=self.existing_id,
         )
         self.existing_id = embed_id
+
+        await self._update_parent_cache()
+
         await interaction.response.edit_message(content=f"Embed saved successfully.", embed=None, view=None)
 
     @discord.ui.button(label="Save & Send", style=discord.ButtonStyle.blurple)
@@ -801,8 +799,11 @@ class EmbedPreviewView(PrivateView):
         )
         self.existing_id = embed_id
 
+        await self._update_parent_cache()
+
         view = ViewChannelSelect(self.cog, self.draft)
-        await interaction.response.edit_message(content="## Select the channel where you want the embed to be sent:", embed=None, view=view)
+        await interaction.response.edit_message(content="## Select the channel where you want the embed to be sent:",
+                                                embed=None, view=view)
 
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary)
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
