@@ -89,7 +89,7 @@ class Logging(commands.Cog):
             description=f"All moderation logs will now be sent here.",
             color=discord.Color(0x944ae8)
         )
-        embed.set_footer(text=f"Set by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text=f"Set by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
         channel = self.bot.get_channel(channel.id) or await self.bot.fetch_channel(channel.id)
         if not channel:
             return await interaction.response.send_message("I can't find the channel that you set for logging! Please ensure I have the necessary permissions.", ephemeral=True)

@@ -87,7 +87,7 @@ class Dblc(commands.Cog):
                 description=f"**{deleted_count}** message(s) purged in {interaction.channel.mention}.",
                 color=discord.Color.red()
             )
-            log_embed.set_footer(text=f"By {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            log_embed.set_footer(text=f"By {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
             await log_ch.send(embed=log_embed)
 
         await interaction.edit_original_response(content=f"Successfully purged **{deleted_count}** message(s).")
@@ -105,7 +105,7 @@ class Dblc(commands.Cog):
                 color=discord.Color.red()
             )
             embed.set_author(name=f"{member.display_name} ({member.id})", icon_url=member.display_avatar.url)
-            embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            embed.set_footer(text=f"by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
             await interaction.response.send_message(embed=embed)
         except Exception as e:
             if interaction.response.is_done():
