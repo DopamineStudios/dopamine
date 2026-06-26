@@ -146,8 +146,12 @@ class HelpCog(commands.Cog):
         page2 = create_base_embed("Automated Moderation", moderation_description)
         page2.add_field(name="Management Commands", value=(
             "`/warn` • Add warnings & trigger auto-punishment\n"
-            "`/pardon` • Remove points from a user history\n"
-            "`/warnings` • View current warnings total and history\n"
+            "`/pardon` • Remove warnings/points from a user\n"
+            "`/warnings` • View current warnings/points total\n"
+            "`/case history` • View full infraction history for a user\n"
+            "`/case view` • View a specific case by ID\n"
+            "`/case all` • Browse all active warnings/points with live leaderboard\n"
+            "`/case delete` • Delete a case and adjust warnings/points\n"
             "`/unban` • Unban a user."
         ), inline=False)
         page2.add_field(name="Nickname Moderator", value=(

@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from config import DB_PATH
 from utils.log import LoggingManager
 from beacon import PrivateLayoutView, beacon_commands
+from natsort import natsorted, ns
 
 
 def parse_duration(duration_str: str) -> Optional[int]:
@@ -57,6 +58,25 @@ def format_duration_str(seconds: int) -> str:
         return f"{weeks} Week{'s' if weeks != 1 else ''}"
     months = days // 30
     return f"{months} Month{'s' if months != 1 else ''}"
+
+
+def format_punishment_label(action: Optional[str], duration: Optional[Union[timedelta, int]] = None) -> str:
+    if not action:
+        return "No punishment (No threshold reached)"
+
+    dur_seconds = None
+    if duration is not None:
+        dur_seconds = int(duration.total_seconds()) if isinstance(duration, timedelta) else int(duration)
+
+    if action == "ban" and not dur_seconds:
+        return "banned permanently"
+    if action == "ban" and dur_seconds:
+        return f"banned for {format_duration_str(dur_seconds)}"
+    if dur_seconds:
+        return f"{action} for {format_duration_str(dur_seconds)}"
+    if action == "warning":
+        return "warned"
+    return f"{action}ed from the server."
 
 
 class ConfirmationView(PrivateLayoutView):
@@ -115,6 +135,146 @@ class ConfirmationView(PrivateLayoutView):
     async def on_timeout(self, interaction: discord.Interaction):
         if self.value is None and self.message:
             await self.update_view(interaction, "Timed Out", discord.Color(0xdf5046))
+            self.stop()
+
+class DestructiveConfirmationView(PrivateLayoutView):
+    def __init__(self, user, cog, title_text: str, body_text: str, color: discord.Color = None):
+        super().__init__(user, timeout=30)
+        self.value = None
+        self.cog = cog
+        self.title_text = title_text
+        self.body_text = body_text
+        self.color = color
+        self.message: discord.Message = None
+        self.build_layout()
+
+    def build_layout(self):
+        self.clear_items()
+        container = discord.ui.Container(accent_color=self.color)
+        container.add_item(discord.ui.TextDisplay(f"### {self.title_text}"))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(self.body_text))
+
+        if self.value is None:
+            action_row = discord.ui.ActionRow()
+            cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+            confirm = discord.ui.Button(label="Confirm", style=discord.ButtonStyle.danger)
+
+            cancel.callback = self.cancel_callback
+            confirm.callback = self.confirm_callback
+
+            action_row.add_item(cancel)
+            action_row.add_item(confirm)
+            container.add_item(discord.ui.Separator())
+            container.add_item(action_row)
+
+        self.add_item(container)
+
+    async def update_view(self, interaction: discord.Interaction, title: str, color: discord.Color):
+        self.title_text = title
+        self.body_text = f"~~{self.body_text}~~"
+        self.color = color
+        self.build_layout()
+
+        if interaction.response.is_done():
+            await interaction.edit_original_response(view=self)
+        else:
+            await interaction.response.edit_message(view=self)
+        self.stop()
+
+    async def cancel_callback(self, interaction: discord.Interaction):
+        self.value = False
+        await self.update_view(interaction, "Action Canceled", discord.Color(0xdf5046))
+
+    async def confirm_callback(self, interaction: discord.Interaction):
+        self.value = True
+        await self.update_view(interaction, "Action Confirmed", discord.Color.green())
+
+    async def on_timeout(self, interaction: discord.Interaction):
+        if self.value is None and self.message:
+            await self.update_view(interaction, "Timed Out", discord.Color(0xdf5046))
+            self.stop()
+
+
+class CaseDeleteConfirmationView(PrivateLayoutView):
+    def __init__(self, user, cog, guild: discord.Guild, case: dict, term: str, body_text: str, title: str):
+        super().__init__(user, timeout=60)
+        self.value = None
+        self.cog = cog
+        self.guild = guild
+        self.case = case
+        self.term = term
+        self.body_text = body_text
+        self.title = title
+        self.message: discord.Message = None
+        self.build_layout()
+
+    def build_layout(self):
+        self.clear_items()
+        container = discord.ui.Container(accent_color=discord.Color(0xdf5046))
+        container.add_item(discord.ui.TextDisplay(f"### {self.title}"))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(self.body_text))
+
+        if self.value is None:
+            term_cap = self.term.title()
+            action_row = discord.ui.ActionRow()
+            cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+            points_only = discord.ui.Button(
+                label=f"Adjust {term_cap}s Only",
+                style=discord.ButtonStyle.danger,
+            )
+            reverse = discord.ui.Button(
+                label=f"Adjust {term_cap}s and Reverse Punishment",
+                style=discord.ButtonStyle.danger,
+            )
+
+            cancel.callback = self.cancel_callback
+            points_only.callback = self.points_only_callback
+            reverse.callback = self.reverse_callback
+
+            action_row.add_item(cancel)
+            action_row.add_item(points_only)
+            action_row.add_item(reverse)
+            container.add_item(discord.ui.Separator())
+            container.add_item(action_row)
+
+        self.add_item(container)
+
+    async def update_view(self, interaction: discord.Interaction, title: str, color: discord.Color):
+        self.body_text = f"~~{self.body_text}~~"
+        self.build_layout()
+
+        if interaction.response.is_done():
+            await interaction.edit_original_response(view=self)
+        else:
+            await interaction.response.edit_message(view=self)
+        self.stop()
+
+    async def cancel_callback(self, interaction: discord.Interaction):
+        self.value = False
+        await self.update_view(interaction, "Action Canceled", discord.Color(0xdf5046))
+
+    async def points_only_callback(self, interaction: discord.Interaction):
+        self.value = "points_only"
+        await interaction.response.defer()
+        await self.cog.execute_case_delete(interaction, self.guild, self.case, reverse=False)
+        await self.update_view(interaction, "Case Deleted", discord.Color.green())
+
+    async def reverse_callback(self, interaction: discord.Interaction):
+        self.value = "reverse"
+        await interaction.response.defer()
+        await self.cog.execute_case_delete(interaction, self.guild, self.case, reverse=True)
+        await self.update_view(interaction, "Case Deleted", discord.Color.green())
+
+    async def on_timeout(self):
+        if self.value is None and self.message:
+            try:
+                self.body_text = f"~~{self.body_text}~~"
+                self.build_layout()
+                await self.message.edit(view=self)
+            except Exception:
+                pass
             self.stop()
 
 
@@ -929,12 +1089,510 @@ class GoToPageModal(discord.ui.Modal):
             await interaction.response.send_message("Invalid input.", ephemeral=True)
 
 
+class CaseDetailPage(PrivateLayoutView):
+    def __init__(self, user, cog, guild: discord.Guild, case: dict, term: str, parent=None):
+        super().__init__(user, timeout=None)
+        self.cog = cog
+        self.guild = guild
+        self.case = case
+        self.term = term
+        self.parent = parent
+        self.message: Optional[discord.Message] = None
+        self.build_layout()
+
+    def build_layout(self):
+        self.clear_items()
+        container = discord.ui.Container()
+        container.add_item(discord.ui.TextDisplay(f"## Case #{self.case['case_number']}"))
+        container.add_item(discord.ui.TextDisplay(
+            "Review this infraction below. Use the actions to manage the case or browse related history."
+        ))
+        container.add_item(discord.ui.Separator())
+
+        punishment = format_punishment_label(
+            self.case["punishment_type"], self.case["punishment_duration"]
+        )
+        reason = self.case["reason"] or "No reason provided."
+        details = (
+            f"* **User:** <@{self.case['user_id']}> (`{self.case['user_id']}`)\n"
+            f"* **Moderator:** <@{self.case['moderator_id']}> (`{self.case['moderator_id']}`)\n"
+            f"* **Date:** <t:{self.case['created_at']}:F> (<t:{self.case['created_at']}:R>)\n"
+            f"* **Amount:** +{self.case['amount']} {self.term}(s)\n"
+            f"* **Total after case:** {self.case['points_after']} {self.term}(s)\n"
+            f"* **Punishment:** {punishment}\n"
+            f"* **Reason:** {reason}"
+        )
+        container.add_item(discord.ui.TextDisplay(details))
+        container.add_item(discord.ui.Separator())
+
+        action_row = discord.ui.ActionRow()
+        history_btn = discord.ui.Button(label="User History", style=discord.ButtonStyle.primary)
+        history_btn.callback = self.history_callback
+        delete_btn = discord.ui.Button(label="Delete Case", style=discord.ButtonStyle.danger)
+        delete_btn.callback = self.delete_callback
+        action_row.add_item(history_btn)
+        action_row.add_item(delete_btn)
+        container.add_item(action_row)
+
+        if self.parent is not None:
+            if isinstance(self.parent, AllActiveInfractionsPage):
+                back_label = "Back to Active Infractions"
+            elif isinstance(self.parent, CaseUserHistoryPage):
+                back_label = "Back to User History"
+            else:
+                back_label = "Back"
+            container.add_item(discord.ui.Separator())
+            row = discord.ui.ActionRow()
+            back_btn = discord.ui.Button(label=back_label, style=discord.ButtonStyle.secondary)
+            back_btn.callback = self.back_callback
+            row.add_item(back_btn)
+            container.add_item(row)
+
+
+        self.add_item(container)
+
+    async def history_callback(self, interaction: discord.Interaction):
+        if isinstance(self.parent, AllActiveInfractionsPage):
+            self.parent.pause_live()
+        cases = await self.cog.get_user_infractions(self.guild.id, self.case["user_id"])
+        view = CaseUserHistoryPage(
+            self.user, self.cog, self.guild, self.case["user_id"], cases, self.term, parent=self
+        )
+        await interaction.response.edit_message(view=view)
+        view.message = self.message
+
+    async def delete_callback(self, interaction: discord.Interaction):
+        user_display = await self.cog.resolve_user_display(self.guild, self.case["user_id"])
+        mod_display = await self.cog.resolve_user_display(self.guild, self.case["moderator_id"])
+        punishment = format_punishment_label(
+            self.case["punishment_type"], self.case["punishment_duration"]
+        )
+        title = f"Delete Case | Case #{self.case['case_number']}"
+        body = (
+            f"* **User:** {user_display}\n"
+            f"* **Moderator:** {mod_display}\n"
+            f"* **Date:** <t:{self.case['created_at']}:F> (<t:{self.case['created_at']}:R>)\n"
+            f"* **Amount:** +{self.case['amount']} {self.term}(s)\n"
+            f"* **Total after case:** {self.case['points_after']} {self.term}(s)\n"
+            f"* **Punishment:** {punishment}\n"
+            f"* **Reason:** {self.case['reason'] or 'No reason provided.'}\n\n"
+            f"Choose how to handle this deletion:"
+        )
+        view = CaseDeleteConfirmationView(
+            interaction.user, self.cog, self.guild, self.case, self.term, body, title
+        )
+        await interaction.response.send_message(view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+    async def back_callback(self, interaction: discord.Interaction):
+        if self.parent is not None:
+            await interaction.response.edit_message(view=self.parent)
+            if isinstance(self.parent, AllActiveInfractionsPage):
+                self.parent.resume_live()
+        else:
+            await interaction.response.defer()
+
+
+class CaseUserHistoryPage(PrivateLayoutView):
+    def __init__(self, user, cog, guild: discord.Guild, target_user_id: int, cases: list,
+                 term: str, page: int = 1, parent=None):
+        super().__init__(user, timeout=None)
+        self.cog = cog
+        self.guild = guild
+        self.target_user_id = target_user_id
+        self.cases = cases
+        self.term = term
+        self.page = page
+        self.per_page = 5
+        self.parent = parent
+        self.message: Optional[discord.Message] = None
+        self.total_pages = max(1, (len(self.cases) - 1) // self.per_page + 1) if self.cases else 1
+        self.build_layout()
+
+    def build_layout(self):
+        self.clear_items()
+        container = discord.ui.Container()
+        term_cap = self.term.title()
+        total_pts = None
+        key = f"{self.guild.id}:{self.target_user_id}"
+        if key in self.cog.user_cache:
+            total_pts = self.cog.user_cache[key]["points"]
+
+        header = f"## {term_cap} History — <@{self.target_user_id}>"
+        if total_pts is not None:
+            header += f"\n-# Current total: **{total_pts}** {self.term}(s) • **{len(self.cases)}** case(s)"
+        container.add_item(discord.ui.TextDisplay(header))
+        container.add_item(discord.ui.TextDisplay(
+            "Browse this user's infraction history. Select a case to view full details."
+        ))
+        container.add_item(discord.ui.Separator())
+
+        start = (self.page - 1) * self.per_page
+        current = self.cases[start:start + self.per_page]
+
+        if not current:
+            container.add_item(discord.ui.TextDisplay("*No cases found for this user.*"))
+        else:
+            for case in current:
+                reason = case["reason"] or "No reason provided."
+                if len(reason) > 80:
+                    reason = reason[:77] + "..."
+                punishment = format_punishment_label(case["punishment_type"], case["punishment_duration"])
+                title = f"### Case #{case['case_number']} • +{case['amount']} {self.term}(s)"
+                desc = (
+                    f"**Punishment:** {punishment}\n"
+                    f"**Reason:** {reason}\n"
+                    f"**Moderator:** <@{case['moderator_id']}> • <t:{case['created_at']}:R>"
+                )
+                view_btn = discord.ui.Button(label="View", style=discord.ButtonStyle.primary)
+                view_btn.callback = self.create_view_callback(case)
+                container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=view_btn))
+
+        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
+        container.add_item(discord.ui.Separator())
+
+        nav_row = discord.ui.ActionRow()
+        left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
+        left_btn.callback = self.prev_callback
+        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+                                   disabled=self.total_pages <= 1)
+        go_btn.callback = self.goto_callback
+        right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
+                                      disabled=self.page >= self.total_pages)
+        right_btn.callback = self.next_callback
+        nav_row.add_item(left_btn)
+        nav_row.add_item(go_btn)
+        nav_row.add_item(right_btn)
+        container.add_item(nav_row)
+
+        if self.parent is not None:
+            container.add_item(discord.ui.Separator())
+            back_btn = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary)
+            back_btn.callback = self.back_callback
+            container.add_item(discord.ui.ActionRow(back_btn))
+
+        self.add_item(container)
+
+    def create_view_callback(self, case):
+        async def callback(interaction: discord.Interaction):
+            if isinstance(self.parent, AllActiveInfractionsPage):
+                self.parent.pause_live()
+            view = CaseDetailPage(self.user, self.cog, self.guild, case, self.term, parent=self)
+            await interaction.response.edit_message(view=view)
+            view.message = self.message
+        return callback
+
+    async def prev_callback(self, interaction: discord.Interaction):
+        self.page -= 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def next_callback(self, interaction: discord.Interaction):
+        self.page += 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def goto_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
+
+    async def back_callback(self, interaction: discord.Interaction):
+        if self.parent is not None:
+            await interaction.response.edit_message(view=self.parent)
+            if isinstance(self.parent, AllActiveInfractionsPage):
+                self.parent.resume_live()
+        else:
+            await interaction.response.defer()
+
+
+class CaseUserSearchModal(discord.ui.Modal):
+    def __init__(self, parent_view):
+        super().__init__(title="Search by User ID")
+        self.parent_view = parent_view
+        self.query_input = discord.ui.TextInput(
+            label="User ID",
+            placeholder="Enter a Discord user ID...",
+            min_length=1,
+            max_length=20,
+            required=True,
+        )
+        self.add_item(self.query_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        query = self.query_input.value.strip()
+        if not query.isdigit():
+            return await interaction.response.send_message("Please enter a valid numeric user ID.", ephemeral=True)
+
+        user_id = int(query)
+        self.parent_view.search_query = query
+        self.parent_view.container_header = f"Search results for `{query}`"
+        self.parent_view.page = 1
+        await self.parent_view.refresh_data()
+        self.parent_view.build_layout()
+        await interaction.response.edit_message(view=self.parent_view)
+
+
+class AllActiveInfractionsPage(PrivateLayoutView):
+    SORT_MOST = "most_points"
+    SORT_LEAST = "least_points"
+    SORT_RECENT = "recent_punishment"
+    SORT_OLDEST = "oldest_punishment"
+    SORT_ALPHA = "alpha"
+    SORT_REVALPHA = "revalpha"
+
+    def __init__(self, user, cog, guild: discord.Guild, term: str, page: int = 1,
+                 current_sort: str = SORT_MOST, live: bool = False, search_query: str = None,
+                 container_header: str = None):
+        super().__init__(user, timeout=None)
+        self.cog = cog
+        self.guild = guild
+        self.guild_id = guild.id
+        self.term = term
+        self.page = page
+        self.per_page = 5
+        self.current_sort = current_sort
+        self.live = live
+        self.search_query = search_query
+        self.container_header = container_header
+        self.entries: List[dict] = []
+        self.filtered_entries: List[dict] = []
+        self.display_names: Dict[int, str] = {}
+        self.total_pages = 1
+        self.message: Optional[discord.Message] = None
+
+    async def initialize(self):
+        await self.refresh_data()
+        self.build_layout()
+
+    async def refresh_data(self):
+        self.entries = await self.cog.get_guild_active_users(self.guild_id)
+        await self._resolve_display_names(self.entries)
+        self.apply_sort()
+        self.apply_filter()
+        self.total_pages = max(1, (len(self.filtered_entries) - 1) // self.per_page + 1) if self.filtered_entries else 1
+        self.page = min(self.page, self.total_pages)
+
+    async def _resolve_display_names(self, entries: List[dict]):
+        for entry in entries:
+            uid = entry["user_id"]
+            if uid in self.display_names:
+                continue
+            member = self.guild.get_member(uid)
+            if member:
+                self.display_names[uid] = member.display_name
+            else:
+                try:
+                    user = await self.cog.bot.fetch_user(uid)
+                    self.display_names[uid] = user.display_name
+                except discord.NotFound:
+                    self.display_names[uid] = f"Unknown User"
+
+    def apply_filter(self):
+        if self.search_query:
+            q = self.search_query.lower()
+            self.filtered_entries = [
+                e for e in self.entries
+                if q in str(e["user_id"]) or q in self.display_names.get(e["user_id"], "").lower()
+            ]
+        else:
+            self.filtered_entries = list(self.entries)
+
+    def apply_sort(self):
+        if self.current_sort == self.SORT_MOST:
+            self.entries.sort(key=lambda x: x["points"], reverse=True)
+        elif self.current_sort == self.SORT_LEAST:
+            self.entries.sort(key=lambda x: x["points"])
+        elif self.current_sort == self.SORT_RECENT:
+            self.entries.sort(key=lambda x: x["last_punishment"] or 0, reverse=True)
+        elif self.current_sort == self.SORT_OLDEST:
+            self.entries.sort(key=lambda x: x["last_punishment"] or 0)
+        elif self.current_sort == self.SORT_ALPHA:
+            self.entries = natsorted(
+                self.entries,
+                key=lambda x: self.display_names.get(x["user_id"], str(x["user_id"])),
+                alg=ns.IGNORECASE,
+            )
+        elif self.current_sort == self.SORT_REVALPHA:
+            self.entries = natsorted(
+                self.entries,
+                key=lambda x: self.display_names.get(x["user_id"], str(x["user_id"])),
+                alg=ns.IGNORECASE,
+                reverse=True,
+            )
+
+    def _rank_emoji(self, rank: int) -> str:
+        if rank == 1:
+            return "🥇"
+        if rank == 2:
+            return "🥈"
+        if rank == 3:
+            return "🥉"
+        return f"**#{rank}**"
+
+    def build_layout(self):
+        self.clear_items()
+        container = discord.ui.Container()
+
+        count_text = f"{len(self.filtered_entries)} Active Member{'s' if len(self.filtered_entries) != 1 else ''}"
+        if self.live:
+            count_text += " • Live"
+
+        if not self.container_header:
+            header = f"## Active Infractions — {count_text}"
+        else:
+            header = f"## {self.container_header}"
+
+        live_btn = discord.ui.Button(
+            label="Disable Live Mode" if self.live else "Enable Live Mode",
+            style=discord.ButtonStyle.secondary if self.live else discord.ButtonStyle.success,
+        )
+        live_btn.callback = self.live_callback
+        lineone = discord.ui.TextDisplay(header)
+        linetwo = discord.ui.TextDisplay(f"Members with active {self.term}(s) in this server. Sort, search, or enable **Live Mode** for real-time updates.")
+        container.add_item(discord.ui.Section(lineone, linetwo, accessory=live_btn))
+        container.add_item(discord.ui.Separator())
+
+        start = (self.page - 1) * self.per_page
+        current = self.filtered_entries[start:start + self.per_page]
+
+        if not current:
+            container.add_item(discord.ui.TextDisplay("*No active infractions found.*"))
+        else:
+            for idx, entry in enumerate(current, start + 1):
+                uid = entry["user_id"]
+                name = self.display_names.get(uid, "Unknown User")
+                rank_label = self._rank_emoji(idx) if self.current_sort == self.SORT_MOST and not self.search_query else f"**#{idx}**"
+                last_p = (
+                    f"<t:{entry['last_punishment']}:R>"
+                    if entry["last_punishment"]
+                    else "never"
+                )
+                title = f"### {rank_label} {name}"
+                desc = (
+                    f"**User:** <@{uid}> (`{uid}`)\n"
+                    f"**Active {self.term.title()}(s):** {entry['points']}\n"
+                    f"**Last punishment:** {last_p}"
+                )
+                cases_btn = discord.ui.Button(label="View Cases", style=discord.ButtonStyle.primary)
+                cases_btn.callback = self.create_cases_callback(uid)
+                container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=cases_btn))
+
+        live_status = "ON — auto-refreshing" if self.live else "OFF"
+        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages} • Live: {live_status}"))
+        container.add_item(discord.ui.Separator())
+
+        nav_row = discord.ui.ActionRow()
+        left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
+        left_btn.callback = self.prev_callback
+        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+                                   disabled=self.total_pages <= 1)
+        go_btn.callback = self.goto_callback
+        right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
+                                      disabled=self.page >= self.total_pages)
+        right_btn.callback = self.next_callback
+        nav_row.add_item(left_btn)
+        nav_row.add_item(go_btn)
+        nav_row.add_item(right_btn)
+        container.add_item(nav_row)
+        container.add_item(discord.ui.Separator())
+
+        control_row = discord.ui.ActionRow()
+        search_btn = discord.ui.Button(label="Search by User ID", style=discord.ButtonStyle.primary)
+        search_btn.callback = self.search_callback
+        clear_btn = discord.ui.Button(label="Clear Search", style=discord.ButtonStyle.secondary,
+                                      disabled=not self.search_query)
+        clear_btn.callback = self.clear_search_callback
+
+        control_row.add_item(search_btn)
+        control_row.add_item(clear_btn)
+        container.add_item(control_row)
+
+        sort_options = [
+            discord.SelectOption(label="Most Points", value=self.SORT_MOST),
+            discord.SelectOption(label="Least Points", value=self.SORT_LEAST),
+            discord.SelectOption(label="Most Recent Punishment", value=self.SORT_RECENT),
+            discord.SelectOption(label="Oldest Punishment", value=self.SORT_OLDEST),
+            discord.SelectOption(label="Alphabetical (A–Z)", value=self.SORT_ALPHA),
+            discord.SelectOption(label="Alphabetical (Z–A)", value=self.SORT_REVALPHA),
+        ]
+        for option in sort_options:
+            if option.value == self.current_sort:
+                option.default = True
+
+        sort_dropdown = discord.ui.Select(placeholder="Sort by...", options=sort_options)
+        sort_dropdown.callback = self.sort_callback
+        container.add_item(discord.ui.ActionRow(sort_dropdown))
+
+        self.add_item(container)
+
+    def pause_live(self):
+        if self.message:
+            self.cog.unregister_live_case_view(self.message.id)
+
+    def resume_live(self):
+        if self.live and self.message:
+            self.cog.register_live_case_view(self.message.id, self)
+
+    def create_cases_callback(self, user_id: int):
+        async def callback(interaction: discord.Interaction):
+            self.pause_live()
+            cases = await self.cog.get_user_infractions(self.guild_id, user_id)
+            view = CaseUserHistoryPage(
+                self.user, self.cog, self.guild, user_id, cases, self.term, parent=self
+            )
+            await interaction.response.edit_message(view=view)
+            view.message = self.message
+        return callback
+
+    async def prev_callback(self, interaction: discord.Interaction):
+        self.page -= 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def next_callback(self, interaction: discord.Interaction):
+        self.page += 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def goto_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
+
+    async def search_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(CaseUserSearchModal(self))
+
+    async def clear_search_callback(self, interaction: discord.Interaction):
+        self.search_query = None
+        self.container_header = None
+        self.page = 1
+        await self.refresh_data()
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def live_callback(self, interaction: discord.Interaction):
+        self.live = not self.live
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+        if self.live and self.message:
+            self.cog.register_live_case_view(self.message.id, self)
+        elif self.message:
+            self.cog.unregister_live_case_view(self.message.id)
+
+    async def sort_callback(self, interaction: discord.Interaction):
+        self.current_sort = interaction.data["values"][0]
+        self.page = 1
+        self.apply_sort()
+        self.apply_filter()
+        self.total_pages = max(1, (len(self.filtered_entries) - 1) // self.per_page + 1) if self.filtered_entries else 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+
 class Points(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.user_cache: Dict[str, Dict[str, Any]] = {}
         self.action_cache: Dict[int, List[Dict[str, Any]]] = {}
         self.settings_cache: Dict[int, Dict[str, Any]] = {}
+        self.live_case_views: Dict[int, AllActiveInfractionsPage] = {}
 
         self.db_pool: Optional[asyncio.Queue] = None
         self.ctx_menu = app_commands.ContextMenu(
@@ -951,10 +1609,12 @@ class Points(commands.Cog):
         self.bot.add_view(ReportActionView(cog=self))
         self.unban_loop.start()
         self.decay_loop.start()
+        self.live_case_refresh_loop.start()
 
     async def cog_unload(self):
         self.unban_loop.stop()
         self.decay_loop.stop()
+        self.live_case_refresh_loop.stop()
 
         if self.db_pool:
             while not self.db_pool.empty():
@@ -1020,6 +1680,22 @@ class Points(commands.Cog):
                     msg_report_channel INTEGER,
                     msg_report_roles TEXT
                 );
+                CREATE TABLE IF NOT EXISTS infractions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    case_number INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    moderator_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    reason TEXT,
+                    punishment_type TEXT,
+                    punishment_duration INTEGER DEFAULT 0,
+                    points_after INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE (guild_id, case_number)
+                );
+                CREATE INDEX IF NOT EXISTS idx_infractions_guild_user ON infractions(guild_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_infractions_guild_case ON infractions(guild_id, case_number);
             ''')
 
             async with db.execute("PRAGMA table_info(settings)") as cursor:
@@ -1033,6 +1709,267 @@ class Points(commands.Cog):
                 await db.execute("ALTER TABLE settings ADD COLUMN msg_report_roles TEXT")
 
             await db.commit()
+
+    def _row_to_infraction(self, row) -> dict:
+        return {
+            "id": row[0],
+            "guild_id": row[1],
+            "case_number": row[2],
+            "user_id": row[3],
+            "moderator_id": row[4],
+            "amount": row[5],
+            "reason": row[6],
+            "punishment_type": row[7],
+            "punishment_duration": row[8],
+            "points_after": row[9],
+            "created_at": row[10],
+        }
+
+    async def next_case_number(self, guild_id: int, db: aiosqlite.Connection) -> int:
+        async with db.execute(
+                "SELECT COALESCE(MAX(case_number), 0) + 1 FROM infractions WHERE guild_id = ?",
+                (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0]
+
+    async def record_infraction(
+            self, guild_id: int, user_id: int, moderator_id: int, amount: int, reason: Optional[str],
+            punishment_type: Optional[str], punishment_duration: int, points_after: int, created_at: int
+    ) -> int:
+        async with self.acquire_db() as db:
+            case_number = await self.next_case_number(guild_id, db)
+            await db.execute(
+                '''INSERT INTO infractions
+                   (guild_id, case_number, user_id, moderator_id, amount, reason,
+                    punishment_type, punishment_duration, points_after, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (guild_id, case_number, user_id, moderator_id, amount, reason,
+                 punishment_type, punishment_duration, points_after, created_at)
+            )
+            await db.commit()
+            return case_number
+
+    async def get_user_infractions(self, guild_id: int, user_id: int) -> List[dict]:
+        async with self.acquire_db() as db:
+            async with db.execute(
+                    '''SELECT id, guild_id, case_number, user_id, moderator_id, amount, reason,
+                              punishment_type, punishment_duration, points_after, created_at
+                       FROM infractions
+                       WHERE guild_id = ? AND user_id = ?
+                       ORDER BY created_at DESC''',
+                    (guild_id, user_id)
+            ) as cursor:
+                return [self._row_to_infraction(row) async for row in cursor]
+
+    async def get_infraction(self, guild_id: int, case_number: int) -> Optional[dict]:
+        async with self.acquire_db() as db:
+            async with db.execute(
+                    '''SELECT id, guild_id, case_number, user_id, moderator_id, amount, reason,
+                              punishment_type, punishment_duration, points_after, created_at
+                       FROM infractions
+                       WHERE guild_id = ? AND case_number = ?''',
+                    (guild_id, case_number)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return self._row_to_infraction(row) if row else None
+
+    async def get_guild_active_users(self, guild_id: int) -> List[dict]:
+        entries = []
+        seen = set()
+        for key, data in self.user_cache.items():
+            g_id_str, u_id_str = key.split(":")
+            if int(g_id_str) != guild_id or data["points"] <= 0:
+                continue
+            user_id = int(u_id_str)
+            seen.add(user_id)
+            entries.append({
+                "user_id": user_id,
+                "points": data["points"],
+                "last_punishment": data["last_punishment"],
+                "last_decay": data["last_decay"],
+            })
+
+        async with self.acquire_db() as db:
+            async with db.execute(
+                    "SELECT user_id, points, last_punishment, last_decay FROM users WHERE guild_id = ? AND points > 0",
+                    (guild_id,)
+            ) as cursor:
+                async for row in cursor:
+                    if row[0] in seen:
+                        continue
+                    entries.append({
+                        "user_id": row[0],
+                        "points": row[1],
+                        "last_punishment": row[2],
+                        "last_decay": row[3],
+                    })
+        return entries
+
+    def register_live_case_view(self, message_id: int, view: AllActiveInfractionsPage):
+        self.live_case_views[message_id] = view
+
+    def unregister_live_case_view(self, message_id: int):
+        self.live_case_views.pop(message_id, None)
+
+    async def refresh_live_case_views(self, guild_id: int):
+        for msg_id, view in list(self.live_case_views.items()):
+            if view.guild_id != guild_id or not view.live:
+                continue
+            try:
+                await view.refresh_data()
+                view.build_layout()
+                if view.message:
+                    await view.message.edit(view=view)
+            except discord.NotFound:
+                self.unregister_live_case_view(msg_id)
+            except Exception as e:
+                print(f"Error refreshing live case view {msg_id}: {e}")
+
+    @tasks.loop(seconds=10)
+    async def live_case_refresh_loop(self):
+        for msg_id, view in list(self.live_case_views.items()):
+            if not view.live:
+                self.unregister_live_case_view(msg_id)
+                continue
+            try:
+                await view.refresh_data()
+                view.build_layout()
+                if view.message:
+                    await view.message.edit(view=view)
+            except discord.NotFound:
+                self.unregister_live_case_view(msg_id)
+            except Exception as e:
+                print(f"Error in live case refresh loop for {msg_id}: {e}")
+
+    @live_case_refresh_loop.before_loop
+    async def before_live_case_refresh_loop(self):
+        await self.bot.wait_until_ready()
+
+    async def delete_infraction(self, guild_id: int, case_number: int) -> bool:
+        async with self.acquire_db() as db:
+            cursor = await db.execute(
+                "DELETE FROM infractions WHERE guild_id = ? AND case_number = ?",
+                (guild_id, case_number)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def sync_last_punishment_from_cases(self, guild_id: int, user_id: int):
+        async with self.acquire_db() as db:
+            async with db.execute(
+                    "SELECT MAX(created_at) FROM infractions WHERE guild_id = ? AND user_id = ?",
+                    (guild_id, user_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+                last_ts = row[0] if row and row[0] else None
+
+        key = f"{guild_id}:{user_id}"
+        data = await self.get_user_data(guild_id, user_id)
+        data["last_punishment"] = last_ts
+        if last_ts is None:
+            data["last_decay"] = None
+        self.user_cache[key] = data
+
+        async with self.acquire_db() as db:
+            await db.execute(
+                '''UPDATE users SET last_punishment = ?, last_decay = ?
+                   WHERE guild_id = ? AND user_id = ?''',
+                (last_ts, data["last_decay"], guild_id, user_id)
+            )
+            await db.commit()
+
+    async def execute_case_delete(self, interaction: discord.Interaction, guild: discord.Guild,
+                                  case: dict, reverse: bool):
+        guild_id = guild.id
+        user_id = case["user_id"]
+        data = await self.get_user_data(guild_id, user_id)
+        new_points = max(0, data["points"] - case["amount"])
+
+        await self.delete_infraction(guild_id, case["case_number"])
+        await self.update_user_points(guild_id, user_id, new_points)
+        await self.sync_last_punishment_from_cases(guild_id, user_id)
+
+        settings = self.settings_cache.get(guild_id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "warning" if is_simple else "point"
+        reversal_notes = []
+
+        if reverse:
+            new_action, _ = self.get_punishment_data(new_points, guild_id)
+
+            if case["punishment_type"] == "timeout":
+                member = guild.get_member(user_id)
+                if member and member.is_timed_out():
+                    if new_action != "timeout":
+                        try:
+                            await member.timeout(None, reason=f"Case #{case['case_number']} deleted by {interaction.user}")
+                            reversal_notes.append("Timeout removed")
+                        except discord.Forbidden:
+                            reversal_notes.append("Failed to remove timeout (missing permissions)")
+                elif member is None:
+                    reversal_notes.append("Timeout reversal skipped (user not in server)")
+
+            elif case["punishment_type"] == "ban" and new_action != "ban":
+                try:
+                    await guild.unban(
+                        discord.Object(id=user_id),
+                        reason=f"Case #{case['case_number']} deleted by {interaction.user}"
+                    )
+                    async with self.acquire_db() as db:
+                        await db.execute(
+                            "DELETE FROM ban_schedule WHERE guild_id = ? AND user_id = ?",
+                            (guild_id, user_id)
+                        )
+                        await db.commit()
+                    reversal_notes.append("User unbanned")
+                except discord.NotFound:
+                    reversal_notes.append("User was not banned")
+                except discord.Forbidden:
+                    reversal_notes.append("Failed to unban (missing permissions)")
+
+        reversal_text = ""
+        if reverse:
+            if reversal_notes:
+                reversal_text = f"\n\n**Reversal:** {', '.join(reversal_notes)}"
+            else:
+                reversal_text = "\n\n**Reversal:** No Discord punishment changes were needed."
+
+        embed = discord.Embed(
+            description=(
+                f"Case **#{case['case_number']}** deleted.\n"
+                f"**{term.title()}s** adjusted: **{data['points']}** → **{new_points}**"
+                f"{reversal_text}"
+            ),
+            color=discord.Color.green()
+        )
+        embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+        if settings.get("punishment_log", 1):
+            log_ch = await self.get_log_channel(guild)
+            if log_ch:
+                log_embed = discord.Embed(
+                    description=(
+                        f"Case **#{case['case_number']}** deleted for <@{user_id}>.\n"
+                        f"**{term.title()}s** adjusted: **{data['points']}** → **{new_points}**"
+                        f"{reversal_text}\n\n"
+                        f"**Original reason:** {case['reason'] or 'No reason provided.'}"
+                    ),
+                    color=discord.Color(0x944ae8)
+                )
+                log_embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+                await log_ch.send(embed=log_embed)
+
+    async def resolve_user_display(self, guild: discord.Guild, user_id: int) -> str:
+        member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        if member:
+            return f"{member.mention} (`{user_id}`)"
+        try:
+            user = await self.bot.fetch_user(user_id)
+            return f"**{user.display_name}** (`{user_id}`)"
+        except discord.NotFound:
+            return f"Unknown User (`{user_id}`)"
 
     async def populate_caches(self):
         self.user_cache.clear()
@@ -1162,6 +2099,8 @@ class Points(commands.Cog):
                              ''', (points, data["last_punishment"], data["last_decay"], guild_id, user_id))
             await db.commit()
 
+        await self.refresh_live_case_views(guild_id)
+
     def get_punishment_data(self, points: int, guild_id: int):
         actions = self.action_cache.get(guild_id, [])
         if not actions:
@@ -1192,7 +2131,7 @@ class Points(commands.Cog):
         return None
 
     async def apply_punishment(self, interaction: discord.Interaction, member: discord.Member, amount: int,
-                               reason: str):
+                               reason: str, case_number: int, old_amount: int):
         settings = self.settings_cache.get(interaction.guild.id, {})
         is_simple = settings.get("simple_mode", 0) == 1
         term = "warning" if is_simple else "point"
@@ -1215,40 +2154,45 @@ class Points(commands.Cog):
         duration_str = format_duration_str(int(duration.total_seconds())) if duration else None
 
         def build_embed(interaction, action_text, duration_str):
-            display_action = action_text
+            display_action = action_text.capitalize()
             if "ban" in action_text.lower() and duration_str is None:
-                display_action = "permanently banned"
+                display_action = "Permanently banned"
 
             if duration_str:
-                first_line = f"{member.mention} has been **{display_action}** for **{duration_str}**."
+                first_line = f"{display_action} for {duration_str}."
             else:
-                first_line = f"{member.mention} has been **{display_action}.**"
+                first_line = f"{display_action}."
 
             dm_preposition = "from" if "ban" in action_text.lower() or "kick" in action_text.lower() else "in"
 
             if duration_str:
-                dm_first_line = f"You have been **{display_action}** {dm_preposition} **{interaction.guild.name}** for **{duration_str}**."
+                dm_first_line = f"You have been {display_action} {dm_preposition} {interaction.guild.name} for {duration_str}."
             else:
-                dm_first_line = f"You have been **{display_action}** {dm_preposition} **{interaction.guild.name}**."
+                dm_first_line = f"You have been {display_action} {dm_preposition} {interaction.guild.name}."
 
+            title = f"{action.capitalize()} | Case #{case_number}"
             description = (
-                f"User has **{amount}** {term}(s) – {first_line}\n\n"
-                f"**Reason:** {reason or 'No reason provided.'}"
+                f"* **Old Amount:** {old_amount} {term}(s)\n"
+                f"* **New Amount:** {amount} {term}(s)\n"
+                f"* **Resulting Action:** {first_line}\n"
+                f"* **Reason:** {reason or 'No reason provided.'}"
             )
 
+            dm_title = f"{dm_first_line}"
             dm_description = (
-                f"You have **{amount}** {term}(s) – {dm_first_line}\n\n"
-                f"**Reason:** {reason or 'No reason provided.'}"
+                f"* **Old Amount:** {old_amount} {term}(s)\n"
+                f"* **New Amount:** {amount} {term}(s)\n"
+                f"* **Reason:** {reason or 'No reason provided.'}"
             )
             is_ban = "ban" in action_text.lower() or "kick" in action_text.lower()
             main_color = discord.Color.red() if is_ban else discord.Color.orange()
 
-            embed = discord.Embed(description=description, color=main_color)
+            embed = discord.Embed(title=title, description=description, color=main_color)
             embed.set_author(name=f"{member} ({member.id})", icon_url=member.display_avatar.url)
-            embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            embed.set_footer(text=f"by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
 
-            dm_embed = discord.Embed(description=dm_description, color=main_color)
-            dm_embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            dm_embed = discord.Embed(title=dm_title, description=dm_description, color=main_color)
+            dm_embed.set_footer(text=f"by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
 
             return embed, dm_embed
 
@@ -1360,7 +2304,14 @@ class Points(commands.Cog):
 
             await db.commit()
 
-    mod_group = beacon_commands.Group(name="moderation", description="Moderation system settings", permissions_preset="moderation")
+        guild_ids = set()
+        for key in self.user_cache:
+            g_id_str, _ = key.split(":")
+            guild_ids.add(int(g_id_str))
+        for guild_id in guild_ids:
+            await self.refresh_live_case_views(guild_id)
+
+    mod_group = beacon_commands.Group(name="moderation", description="Moderation system settings", permissions_preset="moderator")
 
     @mod_group.command(name="dashboard", description="Open the moderation dashboard.")
     async def moderation_dashboard(self, interaction: discord.Interaction):
@@ -1374,10 +2325,12 @@ class Points(commands.Cog):
         await self.apply_default_actions(interaction.guild.id)
         await interaction.response.send_message(view=ModerationDashboard(interaction.user, self))
 
-    @beacon_commands.command(name="point", description="Add points to a user.", permissions_preset="moderation")
+    @beacon_commands.command(name="point", description="Add points to a user.", permissions_preset="moderator")
     @app_commands.describe(delete_messages="Delete the user's messages across all channels (up to 14 days old).")
     async def point(self, interaction: discord.Interaction, member: discord.Member, amount: int,
                     reason: Optional[str] = None, delete_messages: bool = False):
+        if amount <= 0:
+            return await interaction.response.send_message("The amount can't be negative!", epehemral=True)
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})
         if settings.get("simple_mode", 0) == 1:
@@ -1386,10 +2339,12 @@ class Points(commands.Cog):
 
         await self._add_infraction(interaction, member, amount, reason, delete_messages)
 
-    @beacon_commands.command(name="warn", description="Issue a warning (Add 1 or more warnings to user).", permissions_preset="moderation")
+    @beacon_commands.command(name="warn", description="Issue a warning (Add 1 or more warnings to user).", permissions_preset="moderator")
     @app_commands.describe(delete_messages="Delete the user's messages across all channels (up to 14 days old).")
     async def warn(self, interaction: discord.Interaction, member: discord.Member, amount: int = 1, reason: Optional[str] = None,
                    delete_messages: bool = False):
+        if amount <= 0:
+            return await interaction.response.send_message("The amount can't be negative!", epehemral=True)
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})
         if settings.get("simple_mode", 0) == 0:
@@ -1412,6 +2367,7 @@ class Points(commands.Cog):
             asyncio.gather(*tasks, return_exceptions=True)
 
         data = await self.get_user_data(interaction.guild.id, member.id)
+        old_points = max(0, data["points"])
         new_points = max(0, data["points"] + amount)
         now = int(time.time())
 
@@ -1421,33 +2377,35 @@ class Points(commands.Cog):
         settings = self.settings_cache.get(interaction.guild.id, {})
         term = "warning" if settings.get("simple_mode", 0) == 1 else "point"
 
-        if action:
-            if action == "ban" and not duration:
-                punishment_text = "banned permanently"
-            elif action == "ban" and duration:
-                dur_text = format_duration_str(int(duration.total_seconds()))
-                punishment_text = f"{action}ned for {dur_text}"
-            elif duration:
-                dur_text = format_duration_str(int(duration.total_seconds()))
-                punishment_text = f"{action} for {dur_text}"
-            elif action == "warning":
-                punishment_text = f"warned"
-            else:
-                punishment_text = f"{action}ed from the server."
-        else:
-            punishment_text = "No punishment (No threshold reached)"
+        punishment_duration = int(duration.total_seconds()) if duration else 0
+        punishment_text = format_punishment_label(action, duration)
+
+        case_number = await self.record_infraction(
+            guild_id=interaction.guild.id,
+            user_id=member.id,
+            moderator_id=interaction.user.id,
+            amount=amount,
+            reason=reason,
+            punishment_type=action,
+            punishment_duration=punishment_duration,
+            points_after=new_points,
+            created_at=now,
+        )
 
         embed = discord.Embed(
-            description=f"**{member.mention}** now has **{new_points}** {term}(s) – {punishment_text}.\n\n**Reason**: {reason or 'No reason provided.'}",
+            description=(
+                f"**{member.mention}** now has **{new_points}** {term}(s) – {punishment_text}.\n"
+                f"* **Reason:** {reason or 'No reason provided.'}"
+            ),
             color=discord.Color.red()
         )
         embed.set_author(name=f"{member.display_name} ({member.id})", icon_url=member.display_avatar.url)
-        embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text=f"by {interaction.user.display_name} • Case #{case_number}", icon_url=interaction.user.display_avatar.url)
 
         await interaction.edit_original_response(embed=embed, view=None)
-        await self.apply_punishment(interaction, member, new_points, reason)
+        await self.apply_punishment(interaction, member, new_points, reason, case_number, old_points)
 
-    @beacon_commands.command(name="pardon", description="Remove points/warnings from a user.", permissions_preset="moderation")
+    @beacon_commands.command(name="pardon", description="Remove points/warnings from a user.", permissions_preset="moderator")
     async def pardon(self, interaction: discord.Interaction, member: discord.Member, amount: int,
                      reason: Optional[str] = None):
         await self.guild_setup(interaction)
@@ -1479,7 +2437,7 @@ class Points(commands.Cog):
                 log_embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
                 await log_ch.send(embed=log_embed)
 
-    @beacon_commands.command(name="unban", description="Unban a user.", permissions_preset="moderation")
+    @beacon_commands.command(name="unban", description="Unban a user.", permissions_preset="moderator")
     async def unban(self, interaction: discord.Interaction, user: discord.User, reason: Optional[str] = None):
         await self.guild_setup(interaction)
         try:
@@ -1511,7 +2469,7 @@ class Points(commands.Cog):
                 log_embed.set_footer(text=f"by {interaction.user}", icon_url=interaction.user.display_avatar.url)
                 await log_ch.send(embed=log_embed)
 
-    @beacon_commands.command(name="points", description="Show points info.", permissions_preset="moderation")
+    @beacon_commands.command(name="points", description="Show points info.", permissions_preset="moderator")
     async def points_lookup(self, interaction: discord.Interaction, user: discord.User):
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})
@@ -1520,7 +2478,7 @@ class Points(commands.Cog):
                                                            ephemeral=True)
         await self._show_info(interaction, user, "Points")
 
-    @beacon_commands.command(name="warnings", description="Show warnings info.", permissions_preset="moderation")
+    @beacon_commands.command(name="warnings", description="Show warnings info.", permissions_preset="moderator")
     async def warnings_lookup(self, interaction: discord.Interaction, user: discord.User):
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})
@@ -1541,6 +2499,99 @@ class Points(commands.Cog):
         )
         embed.set_author(name=f"{user.name} ({user.id})", icon_url=user.display_avatar.url)
         await interaction.response.send_message(embed=embed)
+
+    case_group = beacon_commands.Group(
+        name="case",
+        description="View and manage infraction history",
+        permissions_preset="moderator",
+    )
+
+    @case_group.command(name="history", description="View all past warnings/points for a user.")
+    async def case_history(self, interaction: discord.Interaction, user: discord.User):
+        await self.guild_setup(interaction)
+        settings = self.settings_cache.get(interaction.guild.id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "warning" if is_simple else "point"
+
+        cases = await self.get_user_infractions(interaction.guild.id, user.id)
+        if not cases:
+            container = discord.ui.Container()
+            container.add_item(discord.ui.TextDisplay(f"## No Cases Found"))
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay(f"No cases found for {user.mention} (`{user.id}`)."))
+            view = PrivateLayoutView(interaction.user, timeout=None)
+            view.clear_items()
+            view.add_item(container)
+            return await interaction.response.send_message(view=view)
+
+        view = CaseUserHistoryPage(
+            interaction.user, self, interaction.guild, user.id, cases, term
+        )
+        await interaction.response.send_message(view=view)
+        view.message = await interaction.original_response()
+
+    @case_group.command(name="view", description="View a specific case by ID.")
+    async def case_view(self, interaction: discord.Interaction, case_id: int):
+        await self.guild_setup(interaction)
+        case = await self.get_infraction(interaction.guild.id, case_id)
+        if not case:
+            return await interaction.response.send_message(
+                f"Case **#{case_id}** not found in this server.", ephemeral=True
+            )
+
+        settings = self.settings_cache.get(interaction.guild.id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "warning" if is_simple else "point"
+
+        view = CaseDetailPage(interaction.user, self, interaction.guild, case, term)
+        await interaction.response.send_message(view=view)
+        view.message = await interaction.original_response()
+
+    @case_group.command(name="all", description="Browse all members with active warnings/points.")
+    async def case_all(self, interaction: discord.Interaction):
+        await self.guild_setup(interaction)
+        settings = self.settings_cache.get(interaction.guild.id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "warning" if is_simple else "point"
+
+        view = AllActiveInfractionsPage(interaction.user, self, interaction.guild, term)
+        await view.initialize()
+        await interaction.response.send_message(view=view)
+        view.message = await interaction.original_response()
+
+    @case_group.command(name="delete", description="Delete a case and adjust the user's warnings/points.")
+    async def case_delete(self, interaction: discord.Interaction, case_id: int):
+        await self.guild_setup(interaction)
+        case = await self.get_infraction(interaction.guild.id, case_id)
+        if not case:
+            return await interaction.response.send_message(
+                f"Case **#{case_id}** not found in this server.", ephemeral=True
+            )
+
+        settings = self.settings_cache.get(interaction.guild.id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "warning" if is_simple else "point"
+        user_display = await self.resolve_user_display(interaction.guild, case["user_id"])
+        mod_display = await self.resolve_user_display(interaction.guild, case["moderator_id"])
+        punishment = format_punishment_label(case["punishment_type"], case["punishment_duration"])
+
+        title = f"Delete Case | Case #{case['case_number']}"
+        body = (
+            f"* **User:** {user_display}\n"
+            f"* **Moderator:** {mod_display}\n"
+            f"* **Date:** <t:{case['created_at']}:F> (<t:{case['created_at']}:R>)\n"
+            f"* **Amount:** +{case['amount']} {term}(s)\n"
+            f"* **Total after case:** {case['points_after']} {term}(s)\n"
+            f"* **Punishment:** {punishment}\n"
+            f"* **Reason:** {case['reason'] or 'No reason provided.'}\n\n"
+            f"Choose how to handle this deletion:"
+        )
+
+        view = CaseDeleteConfirmationView(
+            interaction.user, self, interaction.guild, case, term, body, title
+        )
+        await interaction.response.send_message(view=view)
+        view.message = await interaction.original_response()
 
     async def report_message_menu(self, interaction: discord.Interaction, message: discord.Message):
         await self.guild_setup(interaction)
