@@ -2211,9 +2211,10 @@ class Points(commands.Cog):
         settings = self.settings_cache.get(interaction.guild.id, {})
         is_simple = settings.get("simple_mode", 0) == 1
         term = "warning" if is_simple else "point"
+        errors = []
 
         action, duration = self.get_punishment_data(amount, interaction.guild.id)
-        if not action: return
+        if not action: return []
 
         reason_text = f"{term.title()}s: {amount} | {reason or 'No reason provided.'}"
 
@@ -2268,7 +2269,8 @@ class Points(commands.Cog):
             embed.set_footer(text=f"by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
 
             dm_embed = discord.Embed(title=dm_title, description=dm_description, color=main_color)
-            dm_embed.set_footer(text=f"by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+            dm_embed.set_footer(text=f"by {interaction.user.display_name}",
+                                icon_url=interaction.user.display_avatar.url)
 
             return embed, dm_embed
 
@@ -2277,8 +2279,10 @@ class Points(commands.Cog):
         if settings.get("punishment_dm", 1):
             try:
                 await member.send(embed=dm_embed)
+            except discord.Forbidden:
+                errors.append("DM not sent because user's DMs are closed")
             except:
-                pass
+                errors.append("DM not sent")
 
         try:
             if action == "timeout" and duration:
@@ -2296,12 +2300,16 @@ class Points(commands.Cog):
                         )
                         await db.commit()
         except discord.Forbidden:
-            await interaction.followup.send("Failed to execute punishment. Check my permissions.", ephemeral=True)
+            errors.append("Punishment failed (Missing Permissions)")
+        except Exception as e:
+            errors.append(f"Punishment error: {str(e)}")
 
         if settings.get("punishment_log", 1):
             log_ch = await self.get_log_channel(interaction.guild)
             if log_ch:
                 await log_ch.send(embed=log_embed)
+
+        return errors
 
     @tasks.loop(seconds=60)
     async def unban_loop(self):
@@ -2507,40 +2515,37 @@ class Points(commands.Cog):
 
         await interaction.response.defer()
 
-
         async with self.acquire_db() as db:
-
             async with db.execute(
-                "SELECT id FROM pending_punishments WHERE guild_id = ? AND user_id = ?",
-                (interaction.guild.id, member.id)) as cursor:
-                    pending_entry = await cursor.fetchone()
+                    "SELECT id FROM pending_punishments WHERE guild_id = ? AND user_id = ?",
+                    (interaction.guild.id, member.id)) as cursor:
+                pending_entry = await cursor.fetchone()
 
         if pending_entry:
             pending_id = pending_entry[0]
-        try:
+            try:
+                await member.timeout(None, reason="Pending punishment resolved by formal infraction.")
+            except discord.Forbidden:
+                self.bot.logger.warning(f"Failed to remove timeout for {member.id} (Permissions).")
+            except Exception as e:
+                self.bot.logger.error(f"Error removing timeout for {member.id}: {e}")
 
-            await member.timeout(None, reason="Pending punishment resolved by formal infraction.")
-        except discord.Forbidden:
+            await db.execute("DELETE FROM pending_punishments WHERE id = ?", (pending_id,))
+            await db.commit()
 
-            self.bot.logger.warning(f"Failed to remove timeout for {member.id} (Permissions).")
-        except Exception as e:
-            self.bot.logger.error(f"Error removing timeout for {member.id}: {e}")
-
-        await db.execute(
-            "DELETE FROM pending_punishments WHERE id = ?",
-            (pending_id,)
-        )
-        await db.commit()
+        all_errors = []
 
         if delete_messages:
             def is_user(m):
                 return m.author.id == member.id
 
-        tasks = []
-        for channel in interaction.guild.text_channels:
-            tasks.append(channel.purge(limit=100, check=is_user, bulk=True))
+            tasks = []
+            for channel in interaction.guild.text_channels:
+                tasks.append(channel.purge(limit=100, check=is_user, bulk=True))
 
-        asyncio.gather(tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            if any(isinstance(res, Exception) for res in results):
+                all_errors.append("Some messages were not deleted")
 
         data = await self.get_user_data(interaction.guild.id, member.id)
         old_points = max(0, data["points"])
@@ -2568,25 +2573,35 @@ class Points(commands.Cog):
             created_at=now,
         )
 
+        punishment_errors = await self.apply_punishment(interaction, member, new_points, reason, case_number,
+                                                        old_points)
+        all_errors.extend(punishment_errors)
+
+        embed_desc = (
+            f"{member.mention} now has {new_points} {term}(s) – {punishment_text}.\n"
+            f"* **Reason:** {reason or 'No reason provided.'}"
+        )
+
+        if all_errors:
+            error_str = ", ".join(all_errors)
+            embed_desc += f"\n* **Errors:** {error_str}"
+
         embed = discord.Embed(
-            description=(
-                f"{member.mention} now has {new_points} {term}(s) – {punishment_text}.\n"
-                f" **Reason: {reason or 'No reason provided.'}"
-            ),
+            description=embed_desc,
             color=discord.Color.red()
         )
         embed.set_author(name=f"{member.display_name} ({member.id})", icon_url=member.display_avatar.url)
         embed.set_footer(text=f"by {interaction.user.display_name} • Case #{case_number}",
-                     icon_url=interaction.user.display_avatar.url)
+                         icon_url=interaction.user.display_avatar.url)
 
         expires_at = now + 10
         undo_view = UndoActionView(self, case_number, interaction.guild.id, expires_at)
+
         if not new:
             await interaction.edit_original_response(embed=embed, view=undo_view)
             undo_view.message = await interaction.original_response()
         else:
             undo_view.message = await interaction.followup.send(embed=embed, view=undo_view)
-        await self.apply_punishment(interaction, member, new_points, reason, case_number, old_points)
 
     @beacon_commands.command(name="pardon", description="Remove points/warnings from a user.", permissions_preset="moderator")
     async def pardon(self, interaction: discord.Interaction, member: discord.Member, amount: int,
