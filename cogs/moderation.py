@@ -13,6 +13,12 @@ from utils.log import LoggingManager
 from beacon import PrivateLayoutView, beacon_commands
 from natsort import natsorted, ns
 
+DELETE_OPTIONS = {
+        "Off": 0,
+        "Past 1 Day": 1,
+        "Past 3 Days": 3,
+        "Past 7 Days": 7
+    }
 
 def parse_duration(duration_str: str) -> Optional[int]:
     if not duration_str or duration_str.lower() in ["permanent", "perm", "0", "infinite"]:
@@ -2207,7 +2213,7 @@ class Points(commands.Cog):
         return None
 
     async def apply_punishment(self, interaction: discord.Interaction, member: discord.Member, amount: int,
-                               reason: str, case_number: int, old_amount: int):
+                               reason: str, case_number: int, old_amount: int, delete_days: int = 0):
         settings = self.settings_cache.get(interaction.guild.id, {})
         is_simple = settings.get("simple_mode", 0) == 1
         term = "warning" if is_simple else "point"
@@ -2290,7 +2296,7 @@ class Points(commands.Cog):
             elif action == "kick":
                 await member.kick(reason=reason_text)
             elif action == "ban":
-                await interaction.guild.ban(member, reason=reason_text, delete_message_days=0)
+                await interaction.guild.ban(member, reason=reason_text, delete_message_days=delete_days)
                 if duration:
                     unban_ts = int((discord.utils.utcnow() + duration).timestamp())
                     async with self.acquire_db() as db:
@@ -2422,6 +2428,16 @@ class Points(commands.Cog):
         for guild_id in guild_ids:
             await self.refresh_live_case_views(guild_id)
 
+
+
+    async def delete_days_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
+        app_commands.Choice[str]]:
+        return [
+            app_commands.Choice(name=opt, value=opt)
+            for opt in DELETE_OPTIONS.keys()
+            if opt.lower().startswith(current.lower())
+        ]
+
     async def is_user_pending(self, guild_id: int, user_id: int) -> bool:
         async with self.acquire_db() as db:
             async with db.execute(
@@ -2446,9 +2462,10 @@ class Points(commands.Cog):
         await interaction.response.send_message(view=ModerationDashboard(interaction.user, self))
 
     @beacon_commands.command(name="point", description="Add points to a user.", permissions_preset="moderator")
-    @app_commands.describe(delete_messages="Delete the user's messages across all channels (up to 14 days old).")
+    @app_commands.describe(delete_messages="Wipe message history (Only works if the resulting punishment is a BAN)")
+    @app_commands.autocomplete(delete_messages=delete_days_autocomplete)
     async def point(self, interaction: discord.Interaction, member: discord.Member, amount: int,
-                    reason: Optional[str] = None, delete_messages: bool = False):
+                    reason: Optional[str] = None, delete_messages: Optional[str] = "Off"):
         if amount <= 0:
             return await interaction.response.send_message("The amount can't be negative!", epehemral=True)
         await self.guild_setup(interaction)
@@ -2456,13 +2473,14 @@ class Points(commands.Cog):
         if settings.get("simple_mode", 0) == 1:
             return await interaction.response.send_message("Simple Mode is enabled. Use `/warn` instead.",
                                                            ephemeral=True)
-
-        await self._add_infraction(interaction, member, amount, reason, delete_messages)
+        days_to_delete = DELETE_OPTIONS.get(delete_messages, 0)
+        await self._add_infraction(interaction, member, amount, reason, days_to_delete)
 
     @beacon_commands.command(name="warn", description="Issue a warning (Add 1 or more warnings to user).", permissions_preset="moderator")
-    @app_commands.describe(delete_messages="Delete the user's messages across all channels (up to 14 days old).")
+    @app_commands.describe(delete_messages="Wipe message history (Only works if the resulting punishment is a BAN)")
+    @app_commands.autocomplete(delete_messages=delete_days_autocomplete)
     async def warn(self, interaction: discord.Interaction, member: discord.Member, amount: int = 1, reason: Optional[str] = None,
-                   delete_messages: bool = False):
+                   delete_messages: Optional[str] = "Off"):
         if amount <= 0:
             return await interaction.response.send_message("The amount can't be negative!", epehemral=True)
         await self.guild_setup(interaction)
@@ -2470,13 +2488,14 @@ class Points(commands.Cog):
         if settings.get("simple_mode", 0) == 0:
             return await interaction.response.send_message("Simple Mode is disabled. Use `/point` instead.",
                                                            ephemeral=True)
-
-        await self._add_infraction(interaction, member, amount, reason, delete_messages)
+        days_to_delete = DELETE_OPTIONS.get(delete_messages, 0)
+        await self._add_infraction(interaction, member, amount, reason, days_to_delete)
 
     async def verify_punishment_permissions(self, interaction: discord.Interaction, target: discord.Member) -> Optional[str]:
         if target.id == interaction.user.id:
             return "You can't punish yourself!"
-
+        if target.id == self.bot.user.id:
+            return "You can't use ME to punish ME! 🙃"
         if target.bot:
             return "You can't punish bots!"
 
@@ -2503,7 +2522,7 @@ class Points(commands.Cog):
         return None
 
     async def _add_infraction(self, interaction: discord.Interaction, member: discord.Member, amount: int, reason: str,
-                              delete_messages: bool = False, new: bool = False):
+                              delete_days: int = False, new: bool = False):
 
         permission_error = await self.verify_punishment_permissions(interaction, member)
         if permission_error:
@@ -2535,18 +2554,6 @@ class Points(commands.Cog):
 
         all_errors = []
 
-        if delete_messages:
-            def is_user(m):
-                return m.author.id == member.id
-
-            tasks = []
-            for channel in interaction.guild.text_channels:
-                tasks.append(channel.purge(limit=100, check=is_user, bulk=True))
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            if any(isinstance(res, Exception) for res in results):
-                all_errors.append("Some messages were not deleted")
-
         data = await self.get_user_data(interaction.guild.id, member.id)
         old_points = max(0, data["points"])
         new_points = max(0, data["points"] + amount)
@@ -2574,7 +2581,7 @@ class Points(commands.Cog):
         )
 
         punishment_errors = await self.apply_punishment(interaction, member, new_points, reason, case_number,
-                                                        old_points)
+                                                        old_points, delete_days)
         all_errors.extend(punishment_errors)
 
         embed_desc = (
@@ -2872,7 +2879,7 @@ class Points(commands.Cog):
                 f"{member.mention} is already in the pending list!",
                 ephemeral=True
             )
-        permission_error = self.verify_punishment_permissions(interaction, member)
+        permission_error = await self.verify_punishment_permissions(interaction, member)
         if permission_error:
             if interaction.response.is_done():
                 await interaction.followup.send(permission_error, ephemeral=True)
@@ -2901,7 +2908,7 @@ class Points(commands.Cog):
                 term = "warning" if is_simple else "point"
                 embed = discord.Embed(
                     title="New Pending Punishment",
-                    description=f"* **User:** {member.mention} (`{member.id}`)\n* **Moderator:** {interaction.user.mention} (`{interaction.user.id}`)\n* **Reason:** {reason}\n* ** Timed out user so that user doesn't break more rules while moderators take their time to take action, timeout ends <t:{timeout_until}:f>.",
+                    description=f"* **User:** {member.mention} (`{member.id}`)\n* **Moderator:** {interaction.user.mention} (`{interaction.user.id}`)\n* **Reason:** {reason}\n* **Timed out user so that they doesn't break more rules while moderators take their time to take action, timeout ends <t:{timeout_until}:R>.",
                     color=discord.Color.orange()
                 )
                 embed.set_footer(text="Please take the pending action as soon as possible.")
@@ -3034,17 +3041,16 @@ class PunishPendingModal(discord.ui.Modal):
             placeholder="Enter a Reason for this punishment",
             default=pending["reason"] if not pending['reason'] == "No reason provided" else "",
             max_length=256)
-        self.delete_messages = discord.ui.CheckboxGroup(
-            required=False,
-            min_values=1,
-            max_values=1,
+        self.delete_messages = discord.ui.Select(
+            placeholder="Message Deletion (Only works if resulting action is a BAN)",
             options=[
-                discord.CheckboxGroupOption(
-                    label="Delete user's messages from the last 14 days",
-                    value="delete"
-                )
+                discord.SelectOption(label="Off", value="Off"),
+                discord.SelectOption(label="Past 1 Day", value="Past 1 Day"),
+                discord.SelectOption(label="Past 3 Days", value="Past 3 Days"),
+                discord.SelectOption(label="Past 7 Days", value="Past 7 Days"),
             ]
         )
+        self.delete_messages.default = "Off"
         self.add_item(discord.ui.Label(text=f"{term} to add", component=self.amount))
         self.add_item(discord.ui.Label(text="Reason", component=self.reason))
         self.add_item(discord.ui.Label(text="Message Removal Options", component=self.delete_messages))
@@ -3067,7 +3073,7 @@ class PunishPendingModal(discord.ui.Modal):
         if not member:
             return await interaction.response.send_message("User not found in the server.", ephemeral=True)
 
-        permission_error = self.parent_view.cog.verify_punishment_permissions(interaction, member)
+        permission_error = await self.parent_view.cog.verify_punishment_permissions(interaction, member)
         if permission_error:
 
             if interaction.response.is_done():
