@@ -75,7 +75,7 @@ class MaxWithStrapOn(commands.Cog):
         description="Ignore the command's name - This command turns anyone into Max Verstappen!", cooldown=(1, 5)
     )
     @app_commands.describe(user="User to insert into the image")
-    @beacon_commands.allowed_contexts(discord.app_commands.AppCommandContext.guild, discord.app_commands.AppCommandContext.private_channel, discord.app_commands.AppCommandContext.dm_channel)
+    @app_commands.allowed_contexts(dms=True, guilds=True, private_channels=True)
     async def maxwithstrapon(
         self,
         interaction: discord.Interaction,
