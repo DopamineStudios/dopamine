@@ -226,3 +226,4 @@ __pycache__/
 *.4
 *.5
 /core/sync_state.json
+/cogs/tournament.py
