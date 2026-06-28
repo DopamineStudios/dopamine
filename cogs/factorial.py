@@ -44,7 +44,7 @@ class FactorialCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_pool = ConnectionPool(FDB_PATH, max_connections=5)
-        self.disabled_cache = set()
+        self.enabled_cache = set()
         self.regex = re.compile(r'([0-9\.\+\-\*\/\(\)\^\s]+)!')
 
     async def cog_load(self):
@@ -53,15 +53,15 @@ class FactorialCog(commands.Cog):
         conn = await self.db_pool.acquire()
         try:
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS disabled_guilds (
+                CREATE TABLE IF NOT EXISTS enabled_guilds (
                     guild_id INTEGER PRIMARY KEY
                 )
             """)
             await conn.commit()
 
-            async with conn.execute("SELECT guild_id FROM disabled_guilds") as cursor:
+            async with conn.execute("SELECT guild_id FROM enabled_guilds") as cursor:
                 rows = await cursor.fetchall()
-                self.disabled_cache = {row[0] for row in rows}
+                self.enabled_cache = {row[0] for row in rows}
 
 
         finally:
@@ -132,7 +132,7 @@ class FactorialCog(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
-        if message.guild.id in self.disabled_cache:
+        if not message.guild.id in self.enabled_cache:
             return
 
         match = self.regex.search(message.content)
@@ -150,7 +150,7 @@ class FactorialCog(commands.Cog):
 
         if result_str:
             clean_num = int(number) if number == int(number) else number
-            await message.reply(f"{clean_num}! = {result_str}\n\nAccidentally Factorial! 🤓\n\n-# [What is a factorial?](<https://en.wikipedia.org/wiki/Factorial>)")
+            await message.reply(f"{clean_num}! = {result_str} 🤓\n-# Use `/factorial` to disable.")
 
     @beacon_commands.command(name="factorial", description="Toggle accidental factorial detection for this server.", permissions_preset="manager")
     async def factorial_toggle(self, interaction: discord.Interaction):
@@ -158,25 +158,25 @@ class FactorialCog(commands.Cog):
         conn = await self.db_pool.acquire()
 
         try:
-            async with conn.execute("SELECT 1 FROM disabled_guilds WHERE guild_id = ?", (guild_id,)) as cursor:
+            async with conn.execute("SELECT 1 FROM enabled_guilds WHERE guild_id = ?", (guild_id,)) as cursor:
                 exists = await cursor.fetchone()
 
             if exists:
-                await conn.execute("DELETE FROM disabled_guilds WHERE guild_id = ?", (guild_id,))
+                await conn.execute("DELETE FROM enabled_guilds WHERE guild_id = ?", (guild_id,))
                 await conn.commit()
 
-                if guild_id in self.disabled_cache:
-                    self.disabled_cache.remove(guild_id)
-
-                await interaction.response.send_message("Factorial detection has been **ENABLED** for this server.",
-                                                        ephemeral=False)
-            else:
-                await conn.execute("INSERT OR IGNORE INTO disabled_guilds (guild_id) VALUES (?)", (guild_id,))
-                await conn.commit()
-
-                self.disabled_cache.add(guild_id)
+                if guild_id in self.enabled_cache:
+                    self.enabled_cache.remove(guild_id)
 
                 await interaction.response.send_message("Factorial detection has been **DISABLED** for this server.",
+                                                        ephemeral=False)
+            else:
+                await conn.execute("INSERT OR IGNORE INTO enable_guilds (guild_id) VALUES (?)", (guild_id,))
+                await conn.commit()
+
+                self.enabled_cache.add(guild_id)
+
+                await interaction.response.send_message("Factorial detection has been **ENABLED** for this server.",
                                                         ephemeral=False)
 
         finally:
