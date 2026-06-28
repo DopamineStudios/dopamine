@@ -5,6 +5,7 @@ import aiosqlite
 import asyncio
 import aiohttp
 import io
+import os
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 from beacon import PrivateLayoutView
@@ -26,6 +27,7 @@ def register_font(font_path: str):
     if fontconfig and font_path_str:
         fontconfig.FcConfigAppFontAddFile(None, font_path_str.encode('utf-8'))
 
+
 async def fetch_image(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
     try:
         async with session.get(url) as resp:
@@ -33,6 +35,7 @@ async def fetch_image(session: aiohttp.ClientSession, url: str) -> Optional[byte
                 return await resp.read()
     except:
         return None
+
 
 class LeaveTextModal(discord.ui.Modal, title="Customise Leave Text"):
     message = discord.ui.TextInput(
@@ -48,47 +51,44 @@ class LeaveTextModal(discord.ui.Modal, title="Customise Leave Text"):
         self.callback_func = callback_func
         self.message.default = current_msg or "{member.display_name} has left the server"
 
-
     async def on_submit(self, interaction: discord.Interaction):
         await self.callback_func(interaction, self.message.value)
 
 
 class LeaveImageModal(discord.ui.Modal, title="Customise Goodbye Card"):
-    img_url = discord.ui.TextInput(
-        label="Background Image URL",
-        placeholder="https://example.com/image.png (Leave empty for default)",
-        required=False
-    )
-    line1 = discord.ui.TextInput(
-        label="Line 1 Text (Big)",
-        placeholder="Type here...",
-        required=False,
-        max_length=40
-    )
-    line2 = discord.ui.TextInput(
-        label="Line 2 Text (Small)",
-        placeholder="Type here...",
-        required=False,
-        max_length=50
-    )
-    text_color = discord.ui.TextInput(
-        label="Text Hex Color",
-        placeholder="#FFFFFF",
-        required=False,
-        max_length=7
-    )
+
 
     def __init__(self, data: dict, callback_func):
         super().__init__()
+        self.background_file = discord.ui.FileUpload(
+            required=False
+        )
+        self.line1 = discord.ui.TextInput(
+            placeholder="Type here...",
+            required=False,
+            max_length=40
+        )
+        self.line2 = discord.ui.TextInput(
+            placeholder="Type here...",
+            required=False,
+            max_length=50
+        )
+        self.text_color = discord.ui.TextInput(
+            placeholder="#FFFFFF",
+            required=False,
+            max_length=7
+        )
         self.callback_func = callback_func
-        self.img_url.default = data.get("image_url") or ""
         self.line1.default = data.get("image_line1") or "Goodbye {member.display_name}"
         self.line2.default = data.get("image_line2") or "We hope to see you again!"
         self.text_color.default = data.get("embed_color") or "#FFFFFF"
+        self.add_item(discord.ui.Label(text="Upload Background Image", component=self.background_file))
+        self.add_item(discord.ui.Label(text="Line 1 Text (Big)", component=self.line1))
+        self.add_item(discord.ui.Label(text="Line 2 Text (Small)", component=self.line2))
+        self.add_item(discord.ui.Label(text="Text Hex Colour", component=self.text_color))
 
     async def on_submit(self, interaction: discord.Interaction):
         color_val = self.text_color.value.strip()
-
         hex_pattern = r'^#?([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$'
 
         if color_val and not re.match(hex_pattern, color_val):
@@ -99,7 +99,9 @@ class LeaveImageModal(discord.ui.Modal, title="Customise Goodbye Card"):
 
         if color_val and not color_val.startswith("#"):
             color_val = f"#{color_val}"
-        await self.callback_func(interaction, self.img_url.value, self.line1.value, self.line2.value, self.text_color.value)
+
+        uploaded_attachment = self.background_file.values[0] if self.background_file.values else None
+        await self.callback_func(interaction, uploaded_attachment, self.line1.value, self.line2.value, color_val)
 
 
 class ChannelSelectView(PrivateLayoutView):
@@ -114,7 +116,6 @@ class ChannelSelectView(PrivateLayoutView):
         self.select.callback = self.select_channel
         container.add_item(discord.ui.TextDisplay("## Select the channel where you want leave messages to appear:"))
         container.add_item(discord.ui.ActionRow(self.select))
-
         self.add_item(container)
 
     async def select_channel(self, interaction: discord.Interaction):
@@ -208,7 +209,7 @@ class LeaveDashboardView(PrivateLayoutView):
             self.cog.leave_cache[self.guild_id] = {"guild_id": self.guild_id}
         self.cog.leave_cache[self.guild_id].update(kwargs)
 
-        if "image_url" in kwargs:
+        if "local_image_path" in kwargs or "image_url" in kwargs:
             self.cog.image_bytes_cache.pop(self.guild_id, None)
 
     async def toggle_feature(self, interaction: discord.Interaction):
@@ -286,19 +287,44 @@ class LeaveDashboardView(PrivateLayoutView):
     async def open_image_modal(self, interaction: discord.Interaction):
         await interaction.response.send_modal(LeaveImageModal(self.data, self.image_modal_callback))
 
-    async def image_modal_callback(self, interaction: discord.Interaction, url: str, line1: str, line2: str,
-                                   color: str):
-        final_url = url if url and ("http" in url) else None
-        final_color = color if color.startswith("#") and len(color) == 7 else "#FFFFFF"
+    async def image_modal_callback(self, interaction: discord.Interaction, attachment: Optional[discord.Attachment],
+                                   line1: str, line2: str, color: str):
+        await interaction.response.defer(ephemeral=True)
 
-        await self.update_db(
-            image_url=final_url,
-            image_line1=line1,
-            image_line2=line2,
-            embed_color=final_color
-        )
+        final_color = color if color.startswith("#") and len(color) == 7 else "#FFFFFF"
+        db_updates = {
+            "image_line1": line1,
+            "image_line2": line2,
+            "embed_color": final_color
+        }
+
+        if attachment:
+            old_path = self.data.get("local_image_path")
+            if old_path and os.path.exists(old_path):
+                try:
+                    os.remove(old_path)
+                except Exception as e:
+                    self.cog.bot.logger.error(f"Failed to delete old image {old_path}: {e}")
+
+            try:
+                file_bytes = await attachment.read()
+                img = pyvips.Image.new_from_buffer(file_bytes, "")
+
+                storage_dir = Path("databases/leave_backgrounds")
+                storage_dir.mkdir(parents=True, exist_ok=True)
+
+                new_file_path = storage_dir / f"bg_{self.guild_id}.jpg"
+                img.write_to_file(str(new_file_path), Q=85)
+
+                db_updates["local_image_path"] = str(new_file_path)
+                db_updates["image_url"] = None
+            except Exception as e:
+                await interaction.followup.send(f"Error processing image compression: {e}", ephemeral=True)
+                return
+
+        await self.update_db(**db_updates)
         await self.refresh_state()
-        await interaction.response.edit_message(view=self)
+        await interaction.edit_original_response(view=self)
 
     async def reset_button_callback(self, interaction: discord.Interaction):
         view = DestructiveConfirmationView(
@@ -310,11 +336,18 @@ class LeaveDashboardView(PrivateLayoutView):
         await view.wait()
 
         if view.value:
+            old_path = self.data.get("local_image_path")
+            if old_path and os.path.exists(old_path):
+                try:
+                    os.remove(old_path)
+                except Exception as e:
+                    print(f"Error purging file assets during reset: {e}")
+
             async with self.cog.acquire_db() as db:
                 await db.execute("""
                     UPDATE leave_settings 
                     SET custom_message=NULL, custom_line1=NULL, custom_line2=NULL, 
-                        image_url=NULL, embed_color=NULL, show_text=1, show_image=1 
+                        image_url=NULL, local_image_path=NULL, embed_color=NULL, show_text=1, show_image=1 
                     WHERE guild_id=?
                 """, (self.guild_id,))
                 await db.commit()
@@ -367,7 +400,7 @@ class LeaveDashboardView(PrivateLayoutView):
         if is_enabled:
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(
                 f"Use the Edit Channel button to edit the channel. The current channel is: {channel_mention}"),
-                                                  accessory=btn_channel))
+                accessory=btn_channel))
             container.add_item(discord.ui.Separator())
 
             btn_text_toggle = discord.ui.Button(
@@ -415,7 +448,7 @@ class LeaveDashboardView(PrivateLayoutView):
 
                 curr_l1 = self.data.get("image_line1") or "Goodbye {member.display_name}"
                 curr_l2 = self.data.get("image_line2") or "You will be missed!"
-                using_custom_img = "Yes" if self.data.get("image_url") else "No"
+                using_custom_img = "Yes" if self.data.get("local_image_path") else "No"
                 curr_color = self.data.get("embed_color") or "#FFFFFF"
                 section = discord.ui.Section(
                     discord.ui.TextDisplay(
@@ -433,7 +466,7 @@ class LeaveDashboardView(PrivateLayoutView):
 
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(
                 f"Click the Send Test Message button to send a test message/preview in the set channel: {channel_mention}"),
-                                                  accessory=btn_test))
+                accessory=btn_test))
 
             container.add_item(discord.ui.Separator())
 
@@ -462,6 +495,7 @@ class Leaves(commands.Cog):
     async def cog_load(self):
         await self.init_pools()
         await self.init_db()
+        await self.migrate_old_backgrounds()
         await self.populate_caches()
 
     async def cog_unload(self):
@@ -504,11 +538,62 @@ class Leaves(commands.Cog):
                                  custom_line2 TEXT,
                                  show_image INTEGER DEFAULT 1,
                                  image_url TEXT,
+                                 local_image_path TEXT,
                                  image_line1 TEXT,
                                  image_line2 TEXT,
                                  embed_color TEXT
                              )
                              ''')
+            cursor = await db.execute("PRAGMA table_info(leave_settings)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            optional_columns = {
+                "local_image_path": "TEXT",
+                "image_line1": "TEXT",
+                "image_line2": "TEXT",
+                "embed_color": "TEXT"
+            }
+
+            for col_name, col_type in optional_columns.items():
+                if col_name not in columns:
+                    await db.execute(f"ALTER TABLE leave_settings ADD COLUMN {col_name} {col_type}")
+
+            await db.commit()
+
+    async def migrate_old_backgrounds(self):
+        """Scans for legacy URL properties, processes downloads, saves as JPEG, and remaps layout data."""
+        storage_dir = Path("databases/leave_backgrounds")
+        storage_dir.mkdir(parents=True, exist_ok=True)
+
+        async with self.acquire_db() as db:
+            async with db.execute(
+                    "SELECT guild_id, image_url FROM leave_settings WHERE image_url IS NOT NULL AND local_image_path IS NULL") as cursor:
+                rows = await cursor.fetchall()
+
+            if not rows:
+                return
+
+            print(f"[Migration] Migrating {len(rows)} legacy leave background URL profiles...")
+            async with aiohttp.ClientSession() as session:
+                for guild_id, url in rows:
+                    raw_bytes = await fetch_image(session, url)
+                    if not raw_bytes:
+                        continue
+
+                    try:
+                        img = pyvips.Image.new_from_buffer(raw_bytes, "")
+                        local_path = storage_dir / f"bg_{guild_id}.jpg"
+                        img.write_to_file(str(local_path), Q=85)
+
+                        await db.execute(
+                            "UPDATE leave_settings SET local_image_path = ?, image_url = NULL WHERE guild_id = ?",
+                            (str(local_path), guild_id)
+                        )
+                        await db.commit()
+                    except Exception as e:
+                        print(
+                            f"[Migration Failure] Couldn't compress/migrate legacy asset configurations for server {guild_id}: {e}")
+
     async def populate_caches(self):
         self.leave_cache.clear()
         async with self.acquire_db() as db:
@@ -519,23 +604,17 @@ class Leaves(commands.Cog):
                     data = dict(zip(columns, row))
                     self.leave_cache[data["guild_id"]] = data
 
-    async def get_background_image(self, guild_id: int, image_url: Optional[str]) -> pyvips.Image:
+    async def get_background_image(self, guild_id: int, local_image_path: Optional[str]) -> pyvips.Image:
         if guild_id in self.image_bytes_cache:
             return pyvips.Image.new_from_buffer(self.image_bytes_cache[guild_id], "")
 
         try:
-            raw_bytes = None
-            if image_url:
-                async with aiohttp.ClientSession() as session:
-                    raw_bytes = await fetch_image(session, image_url)
-
-            if raw_bytes:
-                img = pyvips.Image.new_from_buffer(raw_bytes, "")
+            if local_image_path and os.path.exists(local_image_path):
+                img = pyvips.Image.new_from_file(local_image_path)
             else:
                 img = pyvips.Image.new_from_file(LEAVECARD_PATH)
 
             img = img.thumbnail_image(686, height=291, crop="centre")
-
             self.image_bytes_cache[guild_id] = img.write_to_buffer(".png")
             return img
         except Exception as e:
@@ -544,7 +623,7 @@ class Leaves(commands.Cog):
 
     async def generate_leave_card(self, member: discord.User, data: dict, guild: discord.Guild) -> discord.File:
         guild_id = guild.id
-        image_url = data.get("image_url")
+        local_path = data.get("local_image_path")
 
         line1_text = (data.get("image_line1") or "Goodbye {member.display_name}").format(
             member=member, server=guild
@@ -555,7 +634,7 @@ class Leaves(commands.Cog):
         hex_color = data.get("embed_color") or "#FFFFFF"
         rgb = [int(hex_color.lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)]
 
-        base_img = await self.get_background_image(guild_id, image_url)
+        base_img = await self.get_background_image(guild_id, local_path)
         if not base_img.hasalpha():
             base_img = base_img.addalpha()
 
@@ -571,34 +650,26 @@ class Leaves(commands.Cog):
 
             mask = pyvips.Image.black(avatar_size, avatar_size)
             mask = mask.draw_circle(255, avatar_size // 2, avatar_size // 2, (avatar_size // 2) - 1, fill=True)
-
             mask = mask.gaussblur(0.7)
 
             original_alpha = avatar.extract_band(avatar.bands - 1)
-
             final_alpha = (original_alpha / 255) * (mask / 255) * 255
-
             avatar = avatar.extract_band(0, n=3).bandjoin(final_alpha)
 
             base_img = base_img.composite2(avatar, 'over', x=343 - (avatar_size // 2), y=102 - (avatar_size // 2))
-
-        font_family = "gg sans"
 
         def draw_centered_text(base, text, size, y_pos, font_name, weight, color_rgb):
             mask = pyvips.Image.text(
                 f'<span font_family="{font_name}" weight="{weight}" size="{size * 1024}">{text}</span>'
             )
-
             x_pos = (686 - mask.width) // 2
-
             white_text = mask.new_from_image(color_rgb).copy(interpretation="srgb")
             text_img = white_text.bandjoin(mask)
-
             return base.composite2(text_img, 'over', x=x_pos, y=y_pos)
 
         base_img = draw_centered_text(base_img, line1_text, 24, 178, font_name="gg sans", weight="Bold", color_rgb=rgb)
-
-        base_img = draw_centered_text(base_img, line2_text, 22, 223, font_name="gg sans Medium", weight="Normal", color_rgb=rgb)
+        base_img = draw_centered_text(base_img, line2_text, 22, 223, font_name="gg sans Medium", weight="Normal",
+                                      color_rgb=rgb)
 
         png_buffer = base_img.write_to_buffer(".png")
         return discord.File(io.BytesIO(png_buffer), filename="leave.png")
@@ -638,11 +709,13 @@ class Leaves(commands.Cog):
         except Exception as e:
             print(f"Error sending leave message: {e}")
 
-    @beacon_commands.command(name="goodbye", description="Open the leave/goodbye feature dashboard.", permissions_preset="automation")
+    @beacon_commands.command(name="goodbye", description="Open the leave/goodbye feature dashboard.",
+                             permissions_preset="automation")
     async def leave_dashboard(self, interaction: discord.Interaction):
         await interaction.response.send_message(
             view=LeaveDashboardView(self, interaction.guild.id, interaction.user)
         )
+
 
 async def setup(bot):
     await bot.add_cog(Leaves(bot))
