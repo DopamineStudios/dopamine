@@ -266,7 +266,7 @@ class TrackerDashboard(PrivateLayoutView):
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                """### ➤ DOCUMENTATION\n\n**Available Variables**\n* `{count}` - Current member count of your server\n* `{remaining}` - Members remaining to reach the goal\n* `{goal}` - The member goal you've set\n* `{server}` - Name of your server\n**Example Formats**\n* `🎉 {count} members! Only {remaining} more to go!`\n* `{server} reached {count}! Goal: {goal}`\n**Notes**\n* You can customize it however you want, you don't have to use these examples!\n* {remaining} will only work if a goal is set."""))
+                """### ➤ DOCUMENTATION\n\n**Available Variables**\n* `{count}` - Current member count of your server\n* `{remaining}` - Members remaining to reach the goal\n* `{goal}` - The member goal you've set\n* `{server}` - Name of your server\n**Example Formats**\n* `🎉 {count} members! Only {remaining} more to go!`\n* `{server} reached {count}! Goal: {goal}`\n**Notes**\n* You can customize it however you want, you don't have to use these examples!\n* `{remaining}` will only work if a goal is set."""))
 
 
             edit_btn = discord.ui.Button(label="Edit Goal & Format", style=discord.ButtonStyle.primary)
@@ -502,7 +502,7 @@ class MemberCountTracker(commands.Cog):
 
         for data in active_trackers:
             guild_id = data['guild_id']
-            guild = self.bot.get_guild(guild_id) or await self.bot.get_guild(guild_id)
+            guild = self.bot.get_guild(guild_id) or await self.bot.fetch_guild(guild_id)
             if not guild:
                 guild = await self.bot.fetch_guild(guild_id)
             if not guild: continue
