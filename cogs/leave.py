@@ -104,26 +104,6 @@ class LeaveImageModal(discord.ui.Modal, title="Customise Goodbye Card"):
         await self.callback_func(interaction, uploaded_attachment, self.line1.value, self.line2.value, color_val)
 
 
-class ChannelSelectView(PrivateLayoutView):
-    def __init__(self, callback_func, user):
-        super().__init__(user, timeout=30)
-        self.callback_func = callback_func
-        self.build_layout()
-
-    def build_layout(self):
-        container = discord.ui.Container()
-        self.select = discord.ui.ChannelSelect(placeholder="Select a channel...", min_values=1, max_values=1)
-        self.select.callback = self.select_channel
-        container.add_item(discord.ui.TextDisplay("## Select the channel where you want leave messages to appear:"))
-        container.add_item(discord.ui.ActionRow(self.select))
-        self.add_item(container)
-
-    async def select_channel(self, interaction: discord.Interaction):
-        channel = self.select.values[0]
-        await self.callback_func(interaction, channel)
-        self.stop()
-
-
 class DestructiveConfirmationView(PrivateLayoutView):
     def __init__(self, user, title_text, body_text):
         super().__init__(user=user, timeout=30)
@@ -216,23 +196,22 @@ class LeaveDashboardView(PrivateLayoutView):
         is_enabled = self.data.get("is_enabled", 0)
         new_state = 0 if is_enabled else 1
 
+        updates = {"is_enabled": new_state}
+
+        # Automatically fall back to interaction.channel_id if enabling for the first time
         if new_state == 1 and not self.data.get("channel_id"):
-            view = ChannelSelectView(self.channel_selected_callback, interaction.user)
-            await interaction.response.edit_message(view=view)
-            return
+            updates["channel_id"] = interaction.channel_id
 
-        await self.update_db(is_enabled=new_state)
+        await self.update_db(**updates)
         await self.refresh_state()
         await interaction.response.edit_message(view=self)
 
-    async def channel_selected_callback(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        await self.update_db(channel_id=channel.id, is_enabled=1)
+    async def channel_select_dropdown_callback(self, interaction: discord.Interaction):
+        # Dedicated handler for the persistent select menu
+        channel_id = int(interaction.data["values"][0])
+        await self.update_db(channel_id=channel_id)
         await self.refresh_state()
         await interaction.response.edit_message(view=self)
-
-    async def channel_button_callback(self, interaction: discord.Interaction):
-        view = ChannelSelectView(self.channel_selected_callback, interaction.user)
-        await interaction.response.edit_message(view=view)
 
     async def test_button_callback(self, interaction: discord.Interaction):
         channel_id = self.data.get("channel_id")
@@ -371,9 +350,7 @@ class LeaveDashboardView(PrivateLayoutView):
         is_enabled = bool(self.data.get("is_enabled", 0))
         show_text = bool(self.data.get("show_text", 1))
         show_image = bool(self.data.get("show_image", 1))
-
         channel_id = self.data.get("channel_id")
-        channel_mention = f"<#{channel_id}>" if channel_id else "`Not Set`"
 
         container = discord.ui.Container()
         container.add_item(discord.ui.TextDisplay("## Goodbye Feature Dashboard"))
@@ -384,12 +361,6 @@ class LeaveDashboardView(PrivateLayoutView):
         )
         btn_main.callback = self.toggle_feature
 
-        btn_channel = discord.ui.Button(
-            label="Edit Channel",
-            style=discord.ButtonStyle.primary
-        )
-        btn_channel.callback = self.channel_button_callback
-
         section = discord.ui.Section(
             discord.ui.TextDisplay(
                 "Configure all settings related to Dopamine's leave/goodbye feature. Click the adjacent button to enable or disable the feature."),
@@ -397,12 +368,26 @@ class LeaveDashboardView(PrivateLayoutView):
         )
         container.add_item(section)
 
-        if is_enabled:
-            container.add_item(discord.ui.Section(discord.ui.TextDisplay(
-                f"Use the Edit Channel button to edit the channel. The current channel is: {channel_mention}"),
-                accessory=btn_channel))
-            container.add_item(discord.ui.Separator())
+        channel_select = discord.ui.ChannelSelect(
+            placeholder="Select goodbye channel...",
+            min_values=1,
+            max_values=1
+        )
+        channel_select.callback = self.channel_select_dropdown_callback
 
+        if channel_id:
+            channel_select.default_values = [
+                discord.SelectDefaultValue(id=channel_id, type=discord.SelectDefaultValueType.channel)
+            ]
+
+
+        if is_enabled:
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay("### Goodbye Channel Location"))
+            row = discord.ui.ActionRow()
+            row.add_item(channel_select)
+            container.add_item(row)
+            container.add_item(discord.ui.Separator())
             btn_text_toggle = discord.ui.Button(
                 label=f"{'Disable' if show_text else 'Enable'}",
                 style=discord.ButtonStyle.secondary if show_text else discord.ButtonStyle.primary
@@ -464,6 +449,7 @@ class LeaveDashboardView(PrivateLayoutView):
 
             container.add_item(discord.ui.TextDisplay("### Test Message"))
 
+            channel_mention = f"<#{channel_id}>" if channel_id else "`Not Set`"
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(
                 f"Click the Send Test Message button to send a test message/preview in the set channel: {channel_mention}"),
                 accessory=btn_test))
