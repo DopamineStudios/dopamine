@@ -1,13 +1,14 @@
 aiosqlite~=0.22.1
 discord.py~=2.7.1
+emoji~=2.15.0
 psutil~=7.2.2
 RapidFuzz~=3.14.5
-pronouncing~=0.2.0
+pronouncing~=0.3.0
 syllapy~=0.7.2
 inflect~=7.5.0
 natsort~=8.4.0
 pyvips~=3.1.1
 aiohttp~=3.14.1
 pillow~=12.2.0
-pytz~=2025.2
+pytz~=2026.2
 python-dotenv~=1.2.2
