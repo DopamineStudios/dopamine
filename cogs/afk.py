@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import AFKDB_PATH
-from dopamineframework import ViewPaginator, PrivateView
+from beacon import ViewPaginator, PrivateView
 
 
 AFK_BUFFER_SECONDS = 30
