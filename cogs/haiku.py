@@ -15,6 +15,8 @@ import inflect
 
 from config import HDDB_PATH, HWDDB_PATH
 from beacon import beacon_commands
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 class HaikuDetector(commands.Cog):
@@ -355,6 +357,40 @@ class HaikuDetector(commands.Cog):
             return
 
         await self.haiku_queue.put(message)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="haiku",
+            name="Haiku Detection",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="haiku")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="haiku")
+        async with self.acquire_hd_db() as db:
+            settings = await export_table(
+                db, "SELECT * FROM haiku_settings WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"haiku_settings": settings}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="haiku")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "haiku":
+            return DataDeleteResult(feature_id="haiku")
+        async with self.acquire_hd_db() as db:
+            cur = await db.execute("DELETE FROM haiku_settings WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.disabled_guilds.add(guild_id)
+        return DataDeleteResult(feature_id="haiku", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="haiku")
 
     haiku_group = app_commands.Group(name="haiku", description="Haiku detection commands")
     detection_group = beacon_commands.Group(name="detection", description="Haiku detection settings", parent=haiku_group, permissions_preset="automation")

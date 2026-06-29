@@ -9,6 +9,8 @@ import re
 from config import NFDB_PATH, DB_PATH
 from beacon import beacon_commands
 from contextlib import asynccontextmanager
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 from utils.log import LoggingManager
 
 LEET_MAP = str.maketrans({
@@ -651,6 +653,94 @@ class Nickname(commands.Cog):
                     continue
 
         await interaction.followup.send(embed=discord.Embed(title="Scan Complete", description=f"**{count}** nicknames have been moderated.", colour=discord.Colour.green()), ephemeral=True)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="nickname",
+            name="Nickname",
+            user_export=True,
+            user_delete=True,
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="nickname")
+        async with self.acquire_db() as db:
+            if guild_ids is None:
+                rows = await export_table(
+                    db, "SELECT guild_id, user_id FROM verified WHERE user_id = ?", (user_id,))
+            else:
+                placeholders = ",".join("?" * len(guild_ids))
+                rows = await export_table(
+                    db,
+                    f"SELECT guild_id, user_id FROM verified WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    (user_id, *guild_ids),
+                )
+        for row in rows:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {}).setdefault("verified", []).append(row)
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="nickname")
+        async with self.acquire_db() as db:
+            settings = await export_table(
+                db,
+                "SELECT guild_id, symbol_filter, profanity_filter, placeholder, last_scan FROM serversettings WHERE guild_id = ?",
+                (guild_id,),
+            )
+            verified = await export_table(
+                db, "SELECT guild_id, user_id FROM verified WHERE guild_id = ?", (guild_id,))
+            profanity = await export_table(db, "SELECT word FROM profanity")
+        chunk.guild_data[guild_id] = {
+            "settings": settings,
+            "verified": verified,
+            "profanity": profanity,
+        }
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "nickname":
+            return DataDeleteResult(feature_id="nickname")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            if guild_ids is None:
+                cur = await db.execute("DELETE FROM verified WHERE user_id = ?", (user_id,))
+            else:
+                placeholders = ",".join("?" * len(guild_ids))
+                cur = await db.execute(
+                    f"DELETE FROM verified WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    (user_id, *guild_ids),
+                )
+            rows_affected = cur.rowcount
+            await db.commit()
+        if guild_ids is None:
+            for gid in list(self.verifiedcache):
+                self.verifiedcache[gid].discard(user_id)
+        else:
+            for gid in guild_ids:
+                if gid in self.verifiedcache:
+                    self.verifiedcache[gid].discard(user_id)
+        return DataDeleteResult(feature_id="nickname", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "nickname":
+            return DataDeleteResult(feature_id="nickname")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM verified WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM serversettings WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        self.verifiedcache.pop(guild_id, None)
+        self.serversettingscache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="nickname", deleted=True, rows_affected=rows_affected)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="nickname")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Nickname(bot))

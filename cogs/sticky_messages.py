@@ -11,6 +11,8 @@ from beacon import PrivateLayoutView
 from config import STICKYDB_PATH
 from beacon import beacon_commands
 from cogs.embed import UseEmbedPage
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 
@@ -1079,7 +1081,11 @@ class StickyMessages(commands.Cog):
                 await db.commit()
             panel['last_message_id'] = new_msg.id
         except Exception as e:
-            print(f"Sticky Error: {e}")
+            from utils.discord_health import is_access_error, report_access_failure
+            if is_access_error(e):
+                await report_access_failure(
+                    self.bot, panel['guild_id'], "sticky_messages", panel.get('title', '')
+                )
 
     @tasks.loop(seconds=120)
     async def sticky_monitor(self):
@@ -1090,6 +1096,63 @@ class StickyMessages(commands.Cog):
                 await self.update_sticky_message(panel, channel)
 
     sticky_group = beacon_commands.Group(name="sticky", description="Sticky message commands", permissions_preset="automation")
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="sticky_messages",
+            name="Sticky Messages",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="sticky_messages")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="sticky_messages")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM sticky_panels WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"sticky_panels": rows}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="sticky_messages")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "sticky_messages":
+            return DataDeleteResult(feature_id="sticky_messages")
+        panels = list(self.panel_cache.get(guild_id, {}).keys())
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM sticky_panels WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        for title in panels:
+            panel = self.panel_cache.get(guild_id, {}).pop(title, None)
+            if panel:
+                self.active_channels.pop(panel.get("channel_id"), None)
+        return DataDeleteResult(feature_id="sticky_messages", deleted=True, rows_affected=cur.rowcount)
+
+    async def _channel_sendable(self, guild: discord.Guild, channel_id: int) -> bool:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.send_messages
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="sticky_messages")
+        for title in list(self.panel_cache.get(guild.id, {}).keys()):
+            panel = self.panel_cache[guild.id][title]
+            channel_id = panel.get("channel_id")
+            if not channel_id or await self._channel_sendable(guild, channel_id):
+                continue
+            await self.delete_panel(guild.id, title)
+            result.actions.append(f"removed_panel:{title}")
+        return result
 
     @sticky_group.command(name="message", description="Open the Sticky Message Dashboard")
     async def sticky_dashboard(self, interaction: discord.Interaction):

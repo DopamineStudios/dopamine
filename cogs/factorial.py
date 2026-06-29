@@ -182,6 +182,40 @@ class FactorialCog(commands.Cog):
         finally:
             await self.db_pool.release(conn)
 
+    def data_features(self) -> list:
+        from utils.data_protocol import DataFeatureMeta
+        return [DataFeatureMeta(feature_id="factorial", name="Factorial Detection", guild_export=True, guild_delete=True)]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
+        from utils.data_protocol import DataExportChunk
+        return DataExportChunk(feature_id="factorial")
+
+    async def data_export_guild(self, guild_id: int):
+        from utils.data_protocol import DataExportChunk
+        chunk = DataExportChunk(feature_id="factorial")
+        if guild_id in self.enabled_cache:
+            chunk.guild_data[guild_id] = {"enabled": True}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        return DataDeleteResult(feature_id="factorial")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        conn = await self.db_pool.acquire()
+        try:
+            cur = await conn.execute("DELETE FROM enabled_guilds WHERE guild_id = ?", (guild_id,))
+            await conn.commit()
+        finally:
+            await self.db_pool.release(conn)
+        self.enabled_cache.discard(guild_id)
+        return DataDeleteResult(feature_id="factorial", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild):
+        from utils.data_protocol import DataMonitorResult
+        return DataMonitorResult(feature_id="factorial")
+
 
 async def setup(bot):
     await bot.add_cog(FactorialCog(bot))

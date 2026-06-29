@@ -10,6 +10,8 @@ from discord.ext import commands
 
 from beacon import PrivateLayoutView, PrivateView, beacon_commands
 from config import EDB_PATH
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 from utils.time import get_now_plus_seconds_unix
 
 
@@ -265,6 +267,38 @@ class Embeds(commands.Cog):
                 (embed_id, guild_id),
             )
             await db.commit()
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="embeds",
+            name="Embeds",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="embeds")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="embeds")
+        async with self.acquire_db() as db:
+            embeds = await export_table(db, "SELECT * FROM embeds WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"embeds": embeds}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="embeds")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "embeds":
+            return DataDeleteResult(feature_id="embeds")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM embeds WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        return DataDeleteResult(feature_id="embeds", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="embeds")
 
     @beacon_commands.command(name="embed", description="Open the Embed Dashboard.", permissions_preset="support")
     async def embed_dashboard_cmd(self, interaction: discord.Interaction):

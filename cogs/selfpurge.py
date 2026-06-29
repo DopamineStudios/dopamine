@@ -7,6 +7,7 @@ import datetime
 import time
 from config import SPDB_PATH
 from beacon import PrivateLayoutView, beacon_commands, preconditions
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 class ConfirmationView(PrivateLayoutView):
     def __init__(self, user, cog, title_text: str, body_text: str):
@@ -287,6 +288,87 @@ class SelfPurge(commands.Cog):
                 continue
             except discord.HTTPException:
                 continue
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="selfpurge",
+            name="SelfPurge",
+            user_export=True,
+            user_delete=True,
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def _fetch_dicts(self, query: str, params: tuple = ()) -> list[dict]:
+        conn = await self.db.queue.get()
+        try:
+            async with conn.execute(query, params) as cur:
+                rows = await cur.fetchall()
+                if not cur.description:
+                    return []
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in rows]
+        finally:
+            self.db.queue.put_nowait(conn)
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="selfpurge")
+        if guild_ids is None:
+            rows = await self._fetch_dicts(
+                "SELECT guild_id, user_id, execute_at FROM scheduled_purges WHERE user_id = ?",
+                (user_id,),
+            )
+        else:
+            placeholders = ",".join("?" * len(guild_ids))
+            rows = await self._fetch_dicts(
+                f"SELECT guild_id, user_id, execute_at FROM scheduled_purges WHERE user_id = ? AND guild_id IN ({placeholders})",
+                (user_id, *guild_ids),
+            )
+        for row in rows:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {}).setdefault("scheduled_purges", []).append(row)
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        settings = await self._fetch_dicts(
+            "SELECT guild_id, enabled FROM guild_settings WHERE guild_id = ?", (guild_id,))
+        purges = await self._fetch_dicts(
+            "SELECT guild_id, user_id, execute_at FROM scheduled_purges WHERE guild_id = ?", (guild_id,))
+        chunk = DataExportChunk(feature_id="selfpurge")
+        chunk.guild_data[guild_id] = {"settings": settings, "scheduled_purges": purges}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "selfpurge":
+            return DataDeleteResult(feature_id="selfpurge")
+        rows_affected = 0
+        if guild_ids is None:
+            await self.db.execute("DELETE FROM scheduled_purges WHERE user_id = ?", (user_id,))
+            keys = [(g, u) for (g, u) in self.cache_purges if u == user_id]
+        else:
+            for gid in guild_ids:
+                await self.db.execute(
+                    "DELETE FROM scheduled_purges WHERE guild_id = ? AND user_id = ?", (gid, user_id))
+            keys = [(gid, user_id) for gid in guild_ids if (gid, user_id) in self.cache_purges]
+        for key in keys:
+            self.cache_purges.pop(key, None)
+        rows_affected = len(keys)
+        return DataDeleteResult(feature_id="selfpurge", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "selfpurge":
+            return DataDeleteResult(feature_id="selfpurge")
+        purge_keys = [k for k in self.cache_purges if k[0] == guild_id]
+        for key in purge_keys:
+            self.cache_purges.pop(key, None)
+        self.cache_settings.pop(guild_id, None)
+        await self.db.execute("DELETE FROM scheduled_purges WHERE guild_id = ?", (guild_id,))
+        await self.db.execute("DELETE FROM guild_settings WHERE guild_id = ?", (guild_id,))
+        return DataDeleteResult(
+            feature_id="selfpurge", deleted=True, rows_affected=len(purge_keys) + 1)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="selfpurge")
 
 
 async def setup(bot):

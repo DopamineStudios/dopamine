@@ -13,6 +13,8 @@ from datetime import datetime
 from config import SMDB_PATH
 from beacon import PrivateLayoutView, beacon_commands
 from cogs.embed import UseEmbedPage
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 class CreateRepeatingMessageModal(Modal):
@@ -980,6 +982,67 @@ class RepeatingMessages(commands.Cog):
         return f"{', '.join(parts[:-1])}, and {parts[-1]}"
 
     repeating = beacon_commands.Group(name="repeating", description="Repeating Message commands", permissions_preset="automation")
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="repeating_messages",
+            name="Repeating Messages",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="repeating_messages")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="repeating_messages")
+        async with self.acquire_db() as db:
+            rows = await export_table(
+                db, "SELECT * FROM scheduled_messages WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"scheduled_messages": rows}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="repeating_messages")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "repeating_messages":
+            return DataDeleteResult(feature_id="repeating_messages")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM scheduled_messages WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.message_cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="repeating_messages", deleted=True, rows_affected=cur.rowcount)
+
+    async def _channel_sendable(self, guild: discord.Guild, channel_id: int) -> bool:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.send_messages
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="repeating_messages")
+        for m_id, data in list(self.message_cache.get(guild.id, {}).items()):
+            if not data.get("is_active"):
+                continue
+            if await self._channel_sendable(guild, data["channel_id"]):
+                continue
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "UPDATE scheduled_messages SET is_active = 0 WHERE guild_id = ? AND message_id = ?",
+                    (guild.id, m_id),
+                )
+                await db.commit()
+            data["is_active"] = 0
+            result.actions.append(f"deactivated_message:{m_id}")
+        return result
+
     @repeating.command(name="message", description="Open the Repeating Messages Dashboard")
     async def dashboard(self, interaction: discord.Interaction):
         await interaction.response.send_message(
@@ -1003,12 +1066,22 @@ class RepeatingMessages(commands.Cog):
                             else:
                                 await channel.send(data.get("message_content"))
 
-                        new_next_send = now + data["frequency_seconds"]
-
-                        updates.append((new_next_send, guild_id, m_id))
-                        data["next_send_time"] = new_next_send
+                            new_next_send = now + data["frequency_seconds"]
+                            updates.append((new_next_send, guild_id, m_id))
+                            data["next_send_time"] = new_next_send
                     except Exception as e:
-                        print(f"Error sending message {m_id} in guild {guild_id}: {e}")
+                        from utils.discord_health import is_access_error, report_access_failure
+                        if is_access_error(e):
+                            data["is_active"] = 0
+                            async with self.acquire_db() as db:
+                                await db.execute(
+                                    "UPDATE scheduled_messages SET is_active = 0 WHERE guild_id = ? AND message_id = ?",
+                                    (guild_id, m_id),
+                                )
+                                await db.commit()
+                            await report_access_failure(
+                                self.bot, guild_id, "repeating_messages", f"message:{m_id}"
+                            )
 
         if updates:
             async with self.acquire_db() as db:

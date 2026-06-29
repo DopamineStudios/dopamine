@@ -13,6 +13,8 @@ from discord.ext import commands
 from config import ALERTDB_PATH
 
 from beacon import beacon_commands
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 @dataclass
@@ -259,6 +261,44 @@ class Alerts(commands.Cog):
                 pass
 
         asyncio.create_task(send_reminder())
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="alerts",
+            name="Alerts",
+            user_export=True,
+            user_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="alerts")
+        async with self.acquire_db() as db:
+            rows = await export_table(
+                db,
+                "SELECT alert_id, user_id, position FROM alert_reads WHERE user_id = ?",
+                (user_id,),
+            )
+        if rows:
+            chunk.global_data["alert_reads"] = rows
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        return DataExportChunk(feature_id="alerts")
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "alerts":
+            return DataDeleteResult(feature_id="alerts")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM alert_reads WHERE user_id = ?", (user_id,))
+            await db.commit()
+        self._read_users.discard(user_id)
+        return DataDeleteResult(feature_id="alerts", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="alerts")
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="alerts")
 
 
 async def setup(bot: commands.Bot):

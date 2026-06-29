@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Any, Union
 from contextlib import asynccontextmanager
 from config import DB_PATH
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 from utils.log import LoggingManager
 from beacon import PrivateLayoutView, beacon_commands
 from natsort import natsorted, ns
@@ -2927,6 +2929,122 @@ class Points(commands.Cog):
         view = PendingPunishmentsView(interaction.user, self, interaction.guild, pending)
         await view.build_layout()
         await interaction.edit_original_response(view=view)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="moderation",
+            name="Points",
+            user_export=True,
+            user_delete=False,
+            guild_export=True,
+            guild_delete=True,
+            user_delete_note="Moderation points and infractions are preserved for server integrity.",
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="moderation")
+        async with self.acquire_db() as db:
+            if guild_ids is None:
+                users = await export_table(db, "SELECT * FROM users WHERE user_id = ?", (user_id,))
+                infractions = await export_table(
+                    db, "SELECT * FROM infractions WHERE user_id = ?", (user_id,))
+            else:
+                placeholders = ",".join("?" * len(guild_ids))
+                params = (user_id, *guild_ids)
+                users = await export_table(
+                    db,
+                    f"SELECT * FROM users WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    params,
+                )
+                infractions = await export_table(
+                    db,
+                    f"SELECT * FROM infractions WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    params,
+                )
+        for row in users:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {})["points"] = row
+        for row in infractions:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {}).setdefault("infractions", []).append(row)
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="moderation")
+        async with self.acquire_db() as db:
+            users = await export_table(db, "SELECT * FROM users WHERE guild_id = ?", (guild_id,))
+            actions = await export_table(db, "SELECT * FROM actions WHERE guild_id = ?", (guild_id,))
+            ban_schedule = await export_table(
+                db, "SELECT * FROM ban_schedule WHERE guild_id = ?", (guild_id,))
+            settings = await export_table(db, "SELECT * FROM settings WHERE guild_id = ?", (guild_id,))
+            infractions = await export_table(
+                db, "SELECT * FROM infractions WHERE guild_id = ?", (guild_id,))
+            pending = await export_table(
+                db, "SELECT * FROM pending_punishments WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {
+            "users": users,
+            "actions": actions,
+            "ban_schedule": ban_schedule,
+            "settings": settings,
+            "infractions": infractions,
+            "pending_punishments": pending,
+        }
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "moderation":
+            return DataDeleteResult(feature_id="moderation")
+        return DataDeleteResult(
+            feature_id="moderation",
+            deleted=False,
+            message="Moderation points and infractions cannot be deleted per user.",
+        )
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "moderation":
+            return DataDeleteResult(feature_id="moderation")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            for table in ("pending_punishments", "infractions", "ban_schedule", "users", "actions", "settings"):
+                cur = await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
+                rows_affected += cur.rowcount
+            await db.commit()
+        self.settings_cache.pop(guild_id, None)
+        self.action_cache.pop(guild_id, None)
+        keys_to_remove = [k for k in self.user_cache if k.startswith(f"{guild_id}:")]
+        for key in keys_to_remove:
+            self.user_cache.pop(key, None)
+        return DataDeleteResult(feature_id="moderation", deleted=True, rows_affected=rows_affected)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="moderation")
+        settings = self.settings_cache.get(guild.id)
+        if not settings or settings.get("msg_report_enabled", 0) != 1:
+            return result
+        channel_id = settings.get("msg_report_channel")
+        if not channel_id:
+            return result
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = None
+        accessible = (
+            channel is not None
+            and isinstance(channel, discord.abc.GuildChannel)
+            and channel.guild.id == guild.id
+            and channel.permissions_for(guild.me).view_channel
+            and channel.permissions_for(guild.me).send_messages
+        )
+        if not accessible:
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "UPDATE settings SET msg_report_enabled = 0 WHERE guild_id = ?", (guild.id,))
+                await db.commit()
+            settings["msg_report_enabled"] = 0
+            result.actions.append("disabled_msg_report")
+        return result
 
 
 class PendingPunishmentsView(PrivateLayoutView):

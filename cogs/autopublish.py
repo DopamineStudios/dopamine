@@ -80,10 +80,12 @@ class AutoPublish(commands.Cog):
         if message.channel.type == discord.ChannelType.news:
             try:
                 await message.publish()
-            except discord.Forbidden:
-                print(f"Missing permissions to publish in {message.channel.id}")
-            except discord.HTTPException as e:
-                print(f"Failed to publish message: {e}")
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException) as e:
+                from utils.discord_health import is_access_error, report_access_failure
+                if is_access_error(e) and message.guild:
+                    await report_access_failure(
+                        self.bot, message.guild.id, "autopublish", str(message.channel.id)
+                    )
 
     autopublish_group = beacon_commands.Group(name="autopublish",
                                            description="Manage auto-publishing for announcement channels.")
@@ -162,6 +164,69 @@ class AutoPublish(commands.Cog):
             await interaction.response.send_message("A database error occurred.", ephemeral=True)
         finally:
             await self.pool.release(conn)
+
+
+    def data_features(self) -> list:
+        from utils.data_protocol import DataFeatureMeta
+        return [DataFeatureMeta(feature_id="autopublish", name="Auto Publish", guild_export=True, guild_delete=True)]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
+        from utils.data_protocol import DataExportChunk
+        return DataExportChunk(feature_id="autopublish")
+
+    async def data_export_guild(self, guild_id: int):
+        from utils.data_protocol import DataExportChunk
+        chunk = DataExportChunk(feature_id="autopublish")
+        conn = await self.pool.acquire()
+        try:
+            async with conn.execute(
+                "SELECT channel_id FROM autopublish_channels WHERE guild_id = ?", (guild_id,)
+            ) as cur:
+                rows = await cur.fetchall()
+            chunk.guild_data[guild_id] = {"channels": [r[0] for r in rows]}
+        finally:
+            await self.pool.release(conn)
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        return DataDeleteResult(feature_id="autopublish")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        conn = await self.pool.acquire()
+        try:
+            async with conn.execute(
+                "SELECT channel_id FROM autopublish_channels WHERE guild_id = ?", (guild_id,)
+            ) as cur:
+                cids = [r[0] for r in await cur.fetchall()]
+            cur = await conn.execute("DELETE FROM autopublish_channels WHERE guild_id = ?", (guild_id,))
+            await conn.commit()
+        finally:
+            await self.pool.release(conn)
+        for cid in cids:
+            self.cache.discard(cid)
+        return DataDeleteResult(feature_id="autopublish", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild):
+        from utils.data_protocol import DataMonitorResult
+        result = DataMonitorResult(feature_id="autopublish")
+        conn = await self.pool.acquire()
+        try:
+            async with conn.execute(
+                "SELECT channel_id FROM autopublish_channels WHERE guild_id = ?", (guild.id,)
+            ) as cur:
+                cids = [r[0] for r in await cur.fetchall()]
+            for cid in cids:
+                ch = guild.get_channel(cid)
+                if not ch or not ch.permissions_for(guild.me).send_messages:
+                    await conn.execute("DELETE FROM autopublish_channels WHERE channel_id = ?", (cid,))
+                    self.cache.discard(cid)
+                    result.actions.append(f"removed_channel_{cid}")
+            await conn.commit()
+        finally:
+            await self.pool.release(conn)
+        return result
 
 
 async def setup(bot: commands.Bot):

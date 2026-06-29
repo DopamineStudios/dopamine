@@ -14,6 +14,8 @@ from rapidfuzz import fuzz
 from config import ARSPDB_PATH
 from beacon import PrivateLayoutView, beacon_commands
 from cogs.embed import UseEmbedPage
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 import re
 
 
@@ -1181,6 +1183,39 @@ class Autoresponse(commands.Cog):
             await db.commit()
         if guild_id in self.cache:
             self.cache[guild_id].pop(ar_id, None)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="autoresponse",
+            name="Autoresponse",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="autoresponse")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="autoresponse")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM autoresponses WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"autoresponses": rows}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="autoresponse")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "autoresponse":
+            return DataDeleteResult(feature_id="autoresponse")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM autoresponses WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="autoresponse", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="autoresponse")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

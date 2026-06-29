@@ -4,6 +4,8 @@ from discord.ext import commands
 from utils.log import LoggingManager
 from discord.ui import Button, View, TextDisplay
 from beacon import PrivateLayoutView, beacon_commands
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 class DestructiveConfirmationView(PrivateLayoutView):
@@ -134,5 +136,64 @@ class Logging(commands.Cog):
 
         if view.value is True:
             await self.manager.log_remove(interaction.guild_id)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="logging",
+            name="Logging",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="logging")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="logging")
+        async with self.manager.acquire_db() as db:
+            rows = await export_table(
+                db,
+                "SELECT guild_id, channel_id FROM log_channels WHERE guild_id = ?",
+                (guild_id,),
+            )
+        if rows:
+            chunk.guild_data[guild_id] = rows[0]
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="logging")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "logging":
+            return DataDeleteResult(feature_id="logging")
+        existed = await self.manager.log_get(guild_id)
+        if not existed:
+            return DataDeleteResult(feature_id="logging")
+        await self.manager.log_remove(guild_id)
+        return DataDeleteResult(feature_id="logging", deleted=True, rows_affected=1)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="logging")
+        channel_id = await self.manager.log_get(guild.id)
+        if not channel_id:
+            return result
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = None
+        accessible = (
+            channel is not None
+            and isinstance(channel, discord.abc.GuildChannel)
+            and channel.guild.id == guild.id
+            and channel.permissions_for(guild.me).view_channel
+            and channel.permissions_for(guild.me).send_messages
+        )
+        if not accessible:
+            await self.manager.log_remove(guild.id)
+            result.actions.append("disabled_logging")
+        return result
+
 async def setup(bot):
     await bot.add_cog(Logging(bot))

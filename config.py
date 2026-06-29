@@ -61,6 +61,9 @@ EDB_PATH = str(BASE_DIR / "databases" / "embeds.db")
 ARSPDB_PATH = str(BASE_DIR / "databases" / "autoresponse.db")
 AFKDB_PATH = str(BASE_DIR / "databases" / "afk.db")
 TOURNEYDB_PATH = str(BASE_DIR / "databases" / "tournaments.db")
+DATADB_PATH = str(BASE_DIR / "databases" / "data.db")
+DATABASES_DIR = BASE_DIR / "databases"
+BACKUP_DIR = BASE_DIR / "backup"
 
 # Top.gg settings
 TOPGG_API_URL = "https://top.gg/api/bots/{bot_id}/check"

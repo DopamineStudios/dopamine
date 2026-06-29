@@ -713,9 +713,12 @@ class Welcome(commands.Cog):
                 await channel.send(content=msg_content, file=msg_file)
 
         except discord.Forbidden:
-            pass
+            from utils.discord_health import report_access_failure
+            await report_access_failure(self.bot, member.guild.id, "welcome")
         except Exception as e:
-            print(f"Error sending welcome in {member.guild.name}: {e}")
+            from utils.discord_health import is_access_error, report_access_failure
+            if is_access_error(e):
+                await report_access_failure(self.bot, member.guild.id, "welcome")
 
     @commands.Cog.listener()
     async def on_raw_member_remove(self, payload: discord.RawMemberRemoveEvent):
@@ -773,6 +776,59 @@ class Welcome(commands.Cog):
 
         if target_channel:
             await target_channel.send(embed=embed)
+
+    def data_features(self) -> list:
+        from utils.data_protocol import DataFeatureMeta
+        return [DataFeatureMeta(feature_id="welcome", name="Welcome", guild_export=True, guild_delete=True)]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
+        from utils.data_protocol import DataExportChunk
+        return DataExportChunk(feature_id="welcome")
+
+    async def data_export_guild(self, guild_id: int):
+        from utils.data_handlers import export_table
+        from utils.data_protocol import DataExportChunk
+        chunk = DataExportChunk(feature_id="welcome")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM welcome_settings WHERE guild_id = ?", (guild_id,))
+        if rows:
+            chunk.guild_data[guild_id] = {"settings": rows[0]}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        return DataDeleteResult(feature_id="welcome")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None):
+        import os
+        from utils.data_protocol import DataDeleteResult
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM welcome_settings WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.welcome_cache.pop(guild_id, None)
+        bg = Path("databases/welcome_backgrounds") / f"{guild_id}.jpg"
+        if bg.is_file():
+            os.remove(bg)
+        return DataDeleteResult(feature_id="welcome", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild):
+        from utils.data_protocol import DataMonitorResult
+        result = DataMonitorResult(feature_id="welcome")
+        data = self.welcome_cache.get(guild.id)
+        if not data or not data.get("is_enabled"):
+            return result
+        channel_id = data.get("channel_id")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not channel or not channel.permissions_for(guild.me).send_messages:
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "UPDATE welcome_settings SET is_enabled = 0 WHERE guild_id = ?", (guild.id,)
+                )
+                await db.commit()
+            if guild.id in self.welcome_cache:
+                self.welcome_cache[guild.id]["is_enabled"] = 0
+            result.actions.append("disabled_welcome")
+        return result
 
 
 async def setup(bot):

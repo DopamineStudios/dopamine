@@ -12,6 +12,7 @@ from discord.ext import commands, tasks
 from beacon import beacon_commands
 
 from config import DDB_PATH
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 class DatabasePool:
@@ -217,6 +218,82 @@ class DailyCats(commands.Cog):
 
         except Exception as e:
             await ctx.send(f"An error occurred while wiping the database: {e}")
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="daily",
+            name="Daily Cats",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="daily")
+
+    async def _guild_cat_channels(self, guild: discord.Guild) -> list[int]:
+        channels = []
+        for channel_id in list(self.active_cat_channels or []):
+            channel = guild.get_channel(channel_id)
+            if channel is not None and getattr(channel, "guild", None) and channel.guild.id == guild.id:
+                channels.append(channel_id)
+        return channels
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="daily")
+        guild = self.bot.get_guild(guild_id)
+        cat_channels = await self._guild_cat_channels(guild) if guild else []
+        conn = self.db_pool.get_connection()
+        async with conn.execute("SELECT COUNT(*) FROM cat_images") as cursor:
+            image_count = (await cursor.fetchone())[0]
+        chunk.guild_data[guild_id] = {
+            "cat_channels": cat_channels,
+            "cat_images_metadata": {"count": image_count},
+        }
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="daily")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "daily":
+            return DataDeleteResult(feature_id="daily")
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return DataDeleteResult(feature_id="daily")
+        channel_ids = await self._guild_cat_channels(guild)
+        if not channel_ids:
+            return DataDeleteResult(feature_id="daily")
+        conn = self.db_pool.get_connection()
+        placeholders = ",".join("?" * len(channel_ids))
+        cur = await conn.execute(
+            f"DELETE FROM cat_channels WHERE channel_id IN ({placeholders})", channel_ids)
+        await conn.commit()
+        for cid in channel_ids:
+            self.active_cat_channels.discard(cid)
+        return DataDeleteResult(feature_id="daily", deleted=True, rows_affected=cur.rowcount)
+
+    async def _channel_sendable(self, guild: discord.Guild, channel_id: int) -> bool:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.send_messages
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="daily")
+        for channel_id in await self._guild_cat_channels(guild):
+            if not await self._channel_sendable(guild, channel_id):
+                conn = self.db_pool.get_connection()
+                await conn.execute("DELETE FROM cat_channels WHERE channel_id = ?", (channel_id,))
+                await conn.commit()
+                self.active_cat_channels.discard(channel_id)
+                result.actions.append(f"removed_cat_channel:{channel_id}")
+        return result
 
 async def setup(bot):
     await bot.add_cog(DailyCats(bot))

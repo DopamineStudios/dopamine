@@ -552,7 +552,57 @@ class MemberCountTracker(commands.Cog):
                         self.tracker_cache[guild_id]['last_member_count'] = current_count
                     await db.commit()
             except Exception as e:
-                print(f"Error in monitor for {guild_id}: {e}")
+                from utils.discord_health import is_access_error, report_access_failure
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild_id, "member_tracker")
+
+    def data_features(self) -> list:
+        from utils.data_protocol import DataFeatureMeta
+        return [DataFeatureMeta(feature_id="member_tracker", name="Member Tracker", guild_export=True, guild_delete=True)]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
+        from utils.data_protocol import DataExportChunk
+        return DataExportChunk(feature_id="member_tracker")
+
+    async def data_export_guild(self, guild_id: int):
+        from utils.data_handlers import export_table
+        from utils.data_protocol import DataExportChunk
+        chunk = DataExportChunk(feature_id="member_tracker")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM member_tracker WHERE guild_id = ?", (guild_id,))
+        if rows:
+            chunk.guild_data[guild_id] = {"tracker": rows[0]}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        return DataDeleteResult(feature_id="member_tracker")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM member_tracker WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.tracker_cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="member_tracker", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild):
+        from utils.data_protocol import DataMonitorResult
+        result = DataMonitorResult(feature_id="member_tracker")
+        data = self.tracker_cache.get(guild.id)
+        if not data:
+            return result
+        channel_id = data.get("channel_id")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not channel or not channel.permissions_for(guild.me).manage_channels:
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "UPDATE member_tracker SET is_active = 0 WHERE guild_id = ?", (guild.id,)
+                )
+                await db.commit()
+            self.tracker_cache.pop(guild.id, None)
+            result.actions.append("disabled_member_tracker")
+        return result
 
 
 async def setup(bot):

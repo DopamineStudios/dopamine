@@ -10,6 +10,8 @@ from discord.ext import commands
 
 from config import AFKDB_PATH
 from beacon import ViewPaginator, PrivateView
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 AFK_BUFFER_SECONDS = 30
 AFK_MAX_SECONDS = 72 * 60 * 60
@@ -611,6 +613,60 @@ class AFK(commands.Cog):
             timestamp=timestamp,
         )
         self.missed_pings_cache.setdefault(user_id, []).append(entry)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="afk",
+            name="AFK",
+            user_export=True,
+            user_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="afk")
+        async with self.acquire_db() as db:
+            afk_rows = await export_table(
+                db,
+                """SELECT user_id, status, is_global, save_missed_pings, started_at,
+                          buffer_until, origin_guild_id, old_nick
+                   FROM afk_users WHERE user_id = ?""",
+                (user_id,),
+            )
+            missed_rows = await export_table(
+                db,
+                """SELECT id, user_id, author_id, guild_id, channel_id,
+                          message_id, content, timestamp
+                   FROM missed_pings WHERE user_id = ? ORDER BY timestamp ASC""",
+                (user_id,),
+            )
+        if afk_rows:
+            chunk.global_data["afk_state"] = afk_rows[0]
+        if missed_rows:
+            chunk.global_data["missed_pings"] = missed_rows
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        return DataExportChunk(feature_id="afk")
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "afk":
+            return DataDeleteResult(feature_id="afk")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        self.afk_users.pop(user_id, None)
+        self.missed_pings_cache.pop(user_id, None)
+        return DataDeleteResult(feature_id="afk", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="afk")
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="afk")
 
 
 async def setup(bot: commands.Bot):

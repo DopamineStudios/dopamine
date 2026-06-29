@@ -198,7 +198,6 @@ class LeaveDashboardView(PrivateLayoutView):
 
         updates = {"is_enabled": new_state}
 
-        # Automatically fall back to interaction.channel_id if enabling for the first time
         if new_state == 1 and not self.data.get("channel_id"):
             updates["channel_id"] = interaction.channel_id
 
@@ -207,7 +206,6 @@ class LeaveDashboardView(PrivateLayoutView):
         await interaction.response.edit_message(view=self)
 
     async def channel_select_dropdown_callback(self, interaction: discord.Interaction):
-        # Dedicated handler for the persistent select menu
         channel_id = int(interaction.data["values"][0])
         await self.update_db(channel_id=channel_id)
         await self.refresh_state()
@@ -693,7 +691,9 @@ class Leaves(commands.Cog):
                 await channel.send(content=msg_content, file=msg_file)
 
         except Exception as e:
-            print(f"Error sending leave message: {e}")
+            from utils.discord_health import is_access_error, report_access_failure
+            if is_access_error(e):
+                await report_access_failure(self.bot, guild.id, "leave")
 
     @beacon_commands.command(name="goodbye", description="Open the leave/goodbye feature dashboard.",
                              permissions_preset="automation")
@@ -701,6 +701,60 @@ class Leaves(commands.Cog):
         await interaction.response.send_message(
             view=LeaveDashboardView(self, interaction.guild.id, interaction.user)
         )
+
+    def data_features(self) -> list:
+        from utils.data_protocol import DataFeatureMeta
+        return [DataFeatureMeta(feature_id="leave", name="Goodbye", guild_export=True, guild_delete=True)]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
+        from utils.data_protocol import DataExportChunk
+        return DataExportChunk(feature_id="leave")
+
+    async def data_export_guild(self, guild_id: int):
+        from utils.data_handlers import export_table
+        from utils.data_protocol import DataExportChunk
+        chunk = DataExportChunk(feature_id="leave")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM leave_settings WHERE guild_id = ?", (guild_id,))
+        if rows:
+            chunk.guild_data[guild_id] = {"settings": rows[0]}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        return DataDeleteResult(feature_id="leave")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None):
+        import os
+        from pathlib import Path
+        from utils.data_protocol import DataDeleteResult
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM leave_settings WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.leave_cache.pop(guild_id, None)
+        bg = Path("databases/leave_backgrounds") / f"{guild_id}.jpg"
+        if bg.is_file():
+            os.remove(bg)
+        return DataDeleteResult(feature_id="leave", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild):
+        from utils.data_protocol import DataMonitorResult
+        result = DataMonitorResult(feature_id="leave")
+        data = self.leave_cache.get(guild.id)
+        if not data or not data.get("is_enabled"):
+            return result
+        channel_id = data.get("channel_id")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not channel or not channel.permissions_for(guild.me).send_messages:
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "UPDATE leave_settings SET is_enabled = 0 WHERE guild_id = ?", (guild.id,)
+                )
+                await db.commit()
+            if guild.id in self.leave_cache:
+                self.leave_cache[guild.id]["is_enabled"] = 0
+            result.actions.append("disabled_leave")
+        return result
 
 
 async def setup(bot):

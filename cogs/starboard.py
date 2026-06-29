@@ -9,6 +9,8 @@ import time
 from contextlib import asynccontextmanager
 from config import SDB_PATH
 from beacon import PrivateLayoutView, beacon_commands
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 class ThresholdModal(discord.ui.Modal, title="Edit Star Threshold"):
@@ -602,6 +604,70 @@ class StarboardCog(commands.Cog):
 
         channel = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
         channel.send(content=content_str, embed=embed)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="starboard",
+            name="Starboard",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="starboard")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="starboard")
+        async with self.acquire_db() as db:
+            settings = await export_table(
+                db, "SELECT * FROM guild_settings WHERE guild_id = ?", (guild_id,))
+            posts = await export_table(
+                db, "SELECT * FROM star_posts WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"settings": settings, "star_posts": posts}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="starboard")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "starboard":
+            return DataDeleteResult(feature_id="starboard")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM star_posts WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM guild_settings WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        self.settings_cache.pop(guild_id, None)
+        self.star_posts_cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="starboard", deleted=True, rows_affected=rows_affected)
+
+    async def _board_channel_accessible(self, guild: discord.Guild, channel_id: int | None) -> bool:
+        if not channel_id:
+            return True
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.send_messages and perms.embed_links
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="starboard")
+        settings = self.settings_cache.get(guild.id)
+        if not settings or not settings.get("enabled"):
+            return result
+        channel_id = settings.get("starboard_channel_id")
+        if await self._board_channel_accessible(guild, channel_id):
+            return result
+        await self.update_guild_setting(guild.id, enabled=0)
+        result.actions.append("disabled_starboard")
+        return result
 
 
 async def setup(bot):

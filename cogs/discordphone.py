@@ -12,6 +12,8 @@ import time
 import random
 from beacon import beacon_commands
 from config import DP_PATH
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 PERM_STORAGE_CHANNEL_ID = 1476933186461106187
 
@@ -742,6 +744,59 @@ class DiscordPhone(commands.Cog):
         call = self.active_calls[ctx.channel.id]
         await ctx.send("Hanging up...")
         await self.end_call(call, f"Call disconnected by {ctx.author.display_name}.")
+
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="discordphone",
+            name="DiscordPhone",
+            user_export=True,
+            user_delete=True,
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="discordphone")
+        async with self.pool.acquire() as conn:
+            rows = await export_table(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
+        if rows:
+            chunk.global_data["user"] = rows[0]
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="discordphone")
+        async with self.pool.acquire() as conn:
+            guild_rows = await export_table(conn, "SELECT * FROM guilds WHERE id = ?", (guild_id,))
+            settings = await export_table(conn, "SELECT key, value FROM settings")
+        chunk.guild_data[guild_id] = {
+            "guild": guild_rows[0] if guild_rows else None,
+            "settings": settings,
+        }
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "discordphone":
+            return DataDeleteResult(feature_id="discordphone")
+        async with self.pool.acquire() as conn:
+            cur = await conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            await conn.commit()
+            rows_affected = cur.rowcount
+        self.users_cache.pop(user_id, None)
+        return DataDeleteResult(feature_id="discordphone", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "discordphone":
+            return DataDeleteResult(feature_id="discordphone")
+        async with self.pool.acquire() as conn:
+            cur = await conn.execute("DELETE FROM guilds WHERE id = ?", (guild_id,))
+            await conn.commit()
+            rows_affected = cur.rowcount
+        self.guilds_cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="discordphone", deleted=True, rows_affected=rows_affected)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="discordphone")
 
 
 class CustomWarnModal(discord.ui.Modal, title='Warn Custom User'):
