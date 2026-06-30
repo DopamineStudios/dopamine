@@ -6,6 +6,7 @@ from discord.ui import Button, View, TextDisplay
 from beacon import PrivateLayoutView, beacon_commands
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class DestructiveConfirmationView(PrivateLayoutView):
@@ -95,7 +96,15 @@ class Logging(commands.Cog):
         channel = self.bot.get_channel(channel.id) or await self.bot.fetch_channel(channel.id)
         if not channel:
             return await interaction.response.send_message("I can't find the channel that you set for logging! Please ensure I have the necessary permissions.", ephemeral=True)
-        await channel.send(embed=embed)
+        try:
+            await channel.send(embed=embed)
+        except Exception as e:
+            if is_access_error(e):
+                await report_access_failure(self.bot, interaction.guild.id, "logging")
+            return await interaction.response.send_message(
+                "I can't send messages in that channel. Please check my permissions.",
+                ephemeral=True,
+            )
         await interaction.response.send_message(embed=discord.Embed(
             title=f"{"Logging has been enabled" if already else "Logging Channel Updated"}",
             description=f"Log channel set to {channel.mention}",
@@ -119,7 +128,15 @@ class Logging(commands.Cog):
         embed = discord.Embed(title="Beep, boop!",
                               description=f"This is a test message to test whether logging works or not.",
                               color=discord.Colour.blue())
-        await channel.send(embed=embed)
+        try:
+            await channel.send(embed=embed)
+        except Exception as e:
+            if is_access_error(e):
+                await report_access_failure(self.bot, interaction.guild.id, "logging")
+            return await interaction.response.send_message(
+                "I can't send messages in the logging channel. Please check my permissions.",
+                ephemeral=True,
+            )
         await interaction.response.send_message("Test message has been sent successfully!", ephemeral=True)
 
     @log.command(name="disable", description="Disable logging and delete logging channel for this server from database.")

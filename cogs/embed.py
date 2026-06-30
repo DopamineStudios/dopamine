@@ -43,12 +43,12 @@ class Embeds(commands.Cog):
 
     async def cog_unload(self):
         if self.db_pool is not None:
-            closing_tasks = []
             while not self.db_pool.empty():
-                conn = await self.db_pool.get()
-                closing_tasks.append(conn.close())
-            if closing_tasks:
-                await asyncio.gather(*closing_tasks, return_exceptions=True)
+                try:
+                    conn = self.db_pool.get_nowait()
+                    await conn.close()
+                except (asyncio.QueueEmpty, Exception):
+                    break
 
     async def init_pools(self, pool_size: int = 3):
         if self.db_pool is None:

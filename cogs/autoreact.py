@@ -12,6 +12,7 @@ from config import ARDB_PATH
 import emoji
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 EMOJI_REGEX = re.compile(
     r'(<a?:\w{2,32}:\d{15,25}>)'
@@ -876,8 +877,11 @@ class AutoReact(commands.Cog):
                     try:
                         cleaned_emoji = emoji.emojize(em, language='alias')
                         await message.add_reaction(cleaned_emoji)
-                    except:
-                        pass
+                    except Exception as e:
+                        if is_access_error(e) and message.guild:
+                            await report_access_failure(
+                                self.bot, message.guild.id, "autoreact", str(message.channel.id)
+                            )
                 self._reaction_queue.task_done()
                 await asyncio.sleep(0.1)
             except asyncio.CancelledError:

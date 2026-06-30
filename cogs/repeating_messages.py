@@ -15,6 +15,7 @@ from beacon import PrivateLayoutView, beacon_commands
 from cogs.embed import UseEmbedPage
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class CreateRepeatingMessageModal(Modal):
@@ -1070,7 +1071,6 @@ class RepeatingMessages(commands.Cog):
                             updates.append((new_next_send, guild_id, m_id))
                             data["next_send_time"] = new_next_send
                     except Exception as e:
-                        from utils.discord_health import is_access_error, report_access_failure
                         if is_access_error(e):
                             data["is_active"] = 0
                             async with self.acquire_db() as db:

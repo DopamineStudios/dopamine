@@ -14,6 +14,7 @@ from beacon import PrivateLayoutView, PrivateView, beacon_commands
 from config import GDB_PATH
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 from utils.time import get_duration_to_seconds, get_now_plus_seconds_unix
 from natsort import natsorted, ns
 
@@ -1602,13 +1603,12 @@ class Giveaways(commands.Cog):
         self.check_giveaways.cancel()
 
         if self.db_pool is not None:
-            closing_tasks = []
             while not self.db_pool.empty():
-                conn = await self.db_pool.get()
-                closing_tasks.append(conn.close())
-
-            if closing_tasks:
-                await asyncio.gather(*closing_tasks, return_exceptions=True)
+                try:
+                    conn = self.db_pool.get_nowait()
+                    await conn.close()
+                except (asyncio.QueueEmpty, Exception):
+                    break
 
     async def init_pools(self, pool_size: int = 5):
         if self.db_pool is None:
@@ -1788,11 +1788,25 @@ class Giveaways(commands.Cog):
                             pool.append(user_id)
 
         if not pool:
-            channel = self.bot.get_channel(g['channel_id']) or await self.bot.fetch_channel(g['channel_id'])
+            channel = self.bot.get_channel(g['channel_id'])
+            try:
+                if channel is None:
+                    channel = await self.bot.fetch_channel(g['channel_id'])
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild_id, "giveaway", f"giveaway:{giveaway_id}")
+                await self.mark_as_ended(giveaway_id, guild_id, 'participant_cache')
+                return
             if channel:
-                await channel.send(embed=discord.Embed(title="Giveaway Ended",
-                                                       description=f"Giveaway for **{g['prize']}** ended with no participants.",
-                                                       colour=discord.Colour.red()))
+                try:
+                    await channel.send(embed=discord.Embed(
+                        title="Giveaway Ended",
+                        description=f"Giveaway for **{g['prize']}** ended with no participants.",
+                        colour=discord.Colour.red(),
+                    ))
+                except Exception as e:
+                    if is_access_error(e):
+                        await report_access_failure(self.bot, guild_id, "giveaway", f"giveaway:{giveaway_id}")
             await self.mark_as_ended(giveaway_id, guild_id, 'participant_cache')
             return
 
@@ -1852,7 +1866,9 @@ class Giveaways(commands.Cog):
 
                                 await asyncio.sleep(1.5)
 
-            except Exception:
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild_id, "giveaway", f"giveaway:{giveaway_id}")
                 return
 
     async def mark_as_ended(self, giveaway_id: int, guild_id: int, whichone: str):

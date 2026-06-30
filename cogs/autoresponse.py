@@ -16,6 +16,7 @@ from beacon import PrivateLayoutView, beacon_commands
 from cogs.embed import UseEmbedPage
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 import re
 
 
@@ -937,12 +938,12 @@ class Autoresponse(commands.Cog):
 
     async def cog_unload(self):
         if self.db_pool is not None:
-            closing_tasks = []
             while not self.db_pool.empty():
-                conn = await self.db_pool.get()
-                closing_tasks.append(conn.close())
-            if closing_tasks:
-                await asyncio.gather(*closing_tasks, return_exceptions=True)
+                try:
+                    conn = self.db_pool.get_nowait()
+                    await conn.close()
+                except (asyncio.QueueEmpty, Exception):
+                    break
 
     async def init_pools(self, pool_size: int = 5):
         if self.db_pool is None:
@@ -1263,7 +1264,11 @@ class Autoresponse(commands.Cog):
                     embed = discord.Embed.from_dict(record.embed_data)
                     content_text = apply_variables(record.embed_content or "", message) if record.embed_content else None
                     await message.channel.send(content=content_text, embed=embed)
-            except Exception:
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(
+                        self.bot, message.guild.id, "autoresponse", str(message.channel.id)
+                    )
                 continue
 
     @beacon_commands.command(name="autoresponse", description="Open the Autoresponse Dashboard", permissions_preset="automation")

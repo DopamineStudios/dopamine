@@ -11,6 +11,7 @@ from config import SKDB_PATH
 from beacon import PrivateLayoutView, beacon_commands
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class ThresholdModal(discord.ui.Modal, title="Edit Skull Threshold"):
@@ -431,7 +432,9 @@ class SkullboardCog(commands.Cog):
             if not sbc:
                 try:
                     sbc = await guild.fetch_channel(sb_id)
-                except discord.NotFound:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+                    if is_access_error(e):
+                        await report_access_failure(self.bot, guild.id, "skullboard", str(sb_id))
                     return
 
             if existing_id:
@@ -461,16 +464,20 @@ class SkullboardCog(commands.Cog):
             embed = self.build_skullboard_embed(msg)
             content_str = f"💀 **{total_count}** | {msg.channel.mention}"
 
-            if existing_id:
-                try:
-                    sbm = await sbc.fetch_message(existing_id)
-                    await sbm.edit(content=content_str, embed=embed)
-                except discord.NotFound:
+            try:
+                if existing_id:
+                    try:
+                        sbm = await sbc.fetch_message(existing_id)
+                        await sbm.edit(content=content_str, embed=embed)
+                    except discord.NotFound:
+                        new_sbm = await sbc.send(content=content_str, embed=embed)
+                        await self.upsert_skull_post(guild.id, msg.id, new_sbm.id)
+                else:
                     new_sbm = await sbc.send(content=content_str, embed=embed)
                     await self.upsert_skull_post(guild.id, msg.id, new_sbm.id)
-            else:
-                new_sbm = await sbc.send(content=content_str, embed=embed)
-                await self.upsert_skull_post(guild.id, msg.id, new_sbm.id)
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild.id, "skullboard", str(sb_id))
 
         finally:
             self._skullboard_tasks.pop(payload.message_id, None)

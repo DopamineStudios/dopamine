@@ -13,6 +13,7 @@ from beacon import beacon_commands
 from cogs.embed import UseEmbedPage
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 
@@ -1081,7 +1082,6 @@ class StickyMessages(commands.Cog):
                 await db.commit()
             panel['last_message_id'] = new_msg.id
         except Exception as e:
-            from utils.discord_health import is_access_error, report_access_failure
             if is_access_error(e):
                 await report_access_failure(
                     self.bot, panel['guild_id'], "sticky_messages", panel.get('title', '')
@@ -1090,8 +1090,16 @@ class StickyMessages(commands.Cog):
     @tasks.loop(seconds=120)
     async def sticky_monitor(self):
         for c_id, panel in list(self.active_channels.items()):
-            if c_id in self.sticky_tasks: continue
-            channel = self.bot.get_channel(c_id) or await self.bot.fetch_channel(c_id)
+            if c_id in self.sticky_tasks:
+                continue
+            try:
+                channel = self.bot.get_channel(c_id) or await self.bot.fetch_channel(c_id)
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(
+                        self.bot, panel['guild_id'], "sticky_messages", panel.get('title', '')
+                    )
+                continue
             if channel and channel.last_message_id != panel.get('last_message_id'):
                 await self.update_sticky_message(panel, channel)
 

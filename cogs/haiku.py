@@ -17,6 +17,7 @@ from config import HDDB_PATH, HWDDB_PATH
 from beacon import beacon_commands
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class HaikuDetector(commands.Cog):
@@ -178,7 +179,8 @@ class HaikuDetector(commands.Cog):
                         self._recent_processed_messages.append(message.id)
 
             except Exception as e:
-                print(f"Error in haiku worker: {e}")
+                if is_access_error(e) and message.guild:
+                    await report_access_failure(self.bot, message.guild.id, "haiku")
             finally:
                 self.haiku_queue.task_done()
 

@@ -8,6 +8,13 @@ from contextlib import asynccontextmanager
 from config import MCTDB_PATH
 import re
 from beacon import PrivateLayoutView, beacon_commands
+from utils.discord_health import (
+    channel_can_send,
+    is_access_error,
+    report_access_failure,
+    resolve_guild,
+    resolve_guild_channel,
+)
 
 
 class MemberTrackerEditModal(discord.ui.Modal, title="Edit Member Tracker Settings"):
@@ -502,10 +509,9 @@ class MemberCountTracker(commands.Cog):
 
         for data in active_trackers:
             guild_id = data['guild_id']
-            guild = self.bot.get_guild(guild_id) or await self.bot.fetch_guild(guild_id)
+            guild = await resolve_guild(self.bot, guild_id, feature_id="member_tracker")
             if not guild:
-                guild = await self.bot.fetch_guild(guild_id)
-            if not guild: continue
+                continue
 
             exclude_bots = data.get('exclude_bots', 0)
             if exclude_bots:
@@ -518,8 +524,16 @@ class MemberCountTracker(commands.Cog):
             if current_count <= last_count:
                 continue
 
-            channel = guild.get_channel(data['channel_id'])
-            if not channel: continue
+            channel_id = data['channel_id']
+            _, channel = await resolve_guild_channel(
+                self.bot, guild_id, channel_id, feature_id="member_tracker"
+            )
+            if not channel:
+                continue
+
+            if not channel_can_send(channel, guild):
+                await report_access_failure(self.bot, guild_id, "member_tracker", str(channel_id))
+                continue
 
             fmt = data['custom_format']
             goal = data['member_goal']
@@ -552,7 +566,6 @@ class MemberCountTracker(commands.Cog):
                         self.tracker_cache[guild_id]['last_member_count'] = current_count
                     await db.commit()
             except Exception as e:
-                from utils.discord_health import is_access_error, report_access_failure
                 if is_access_error(e):
                     await report_access_failure(self.bot, guild_id, "member_tracker")
 
@@ -593,8 +606,7 @@ class MemberCountTracker(commands.Cog):
         if not data:
             return result
         channel_id = data.get("channel_id")
-        channel = guild.get_channel(channel_id) if channel_id else None
-        if not channel or not channel.permissions_for(guild.me).manage_channels:
+        if not channel_id:
             async with self.acquire_db() as db:
                 await db.execute(
                     "UPDATE member_tracker SET is_active = 0 WHERE guild_id = ?", (guild.id,)
@@ -602,6 +614,19 @@ class MemberCountTracker(commands.Cog):
                 await db.commit()
             self.tracker_cache.pop(guild.id, None)
             result.actions.append("disabled_member_tracker")
+            return result
+        _, channel = await resolve_guild_channel(
+            self.bot, guild.id, channel_id, feature_id="member_tracker"
+        )
+        if channel and channel_can_send(channel, guild):
+            return result
+        async with self.acquire_db() as db:
+            await db.execute(
+                "UPDATE member_tracker SET is_active = 0 WHERE guild_id = ?", (guild.id,)
+            )
+            await db.commit()
+        self.tracker_cache.pop(guild.id, None)
+        result.actions.append("disabled_member_tracker")
         return result
 
 

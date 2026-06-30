@@ -13,6 +13,7 @@ from beacon import beacon_commands
 
 from config import DDB_PATH
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class DatabasePool:
@@ -144,15 +145,46 @@ class DailyCats(commands.Cog):
                         image_blob = row[0]
 
             async def send_to_channel(channel_id):
-                channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-                if not channel: return
+                guild_id = None
+                ch = self.bot.get_channel(channel_id)
+                if isinstance(ch, discord.abc.GuildChannel):
+                    guild_id = ch.guild.id
+                elif ch is None:
+                    try:
+                        ch = await self.bot.fetch_channel(channel_id)
+                        if isinstance(ch, discord.abc.GuildChannel):
+                            guild_id = ch.guild.id
+                    except Exception as e:
+                        if guild_id is None:
+                            for g in self.bot.guilds:
+                                if g.get_channel(channel_id):
+                                    guild_id = g.id
+                                    ch = g.get_channel(channel_id)
+                                    break
+                        if guild_id and is_access_error(e):
+                            await report_access_failure(
+                                self.bot, guild_id, "daily", f"channel:{channel_id}"
+                            )
+                        return
+
+                if not ch or guild_id is None:
+                    return
 
                 if channel_id in self.active_cat_channels and image_blob:
                     try:
                         file = discord.File(io.BytesIO(image_blob), filename="daily_cat.png")
-                        await channel.send(content="Today's Cat Pic:", file=file)
+                        await ch.send(content="Today's Cat Pic:", file=file)
                     except Exception as e:
-                        print(f"Failed to send cat pic to {channel_id}: {e}")
+                        if is_access_error(e):
+                            conn = self.db_pool.get_connection()
+                            await conn.execute(
+                                "DELETE FROM cat_channels WHERE channel_id = ?", (channel_id,)
+                            )
+                            await conn.commit()
+                            self.active_cat_channels.discard(channel_id)
+                            await report_access_failure(
+                                self.bot, guild_id, "daily", f"channel:{channel_id}"
+                            )
 
             await asyncio.gather(*(send_to_channel(cid) for cid in list(self.active_cat_channels)))
 

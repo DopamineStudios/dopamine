@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from config import DB_PATH
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure, resolve_guild_channel, channel_can_send
 from utils.log import LoggingManager
 from beacon import PrivateLayoutView, beacon_commands
 from natsort import natsorted, ns
@@ -2209,8 +2210,12 @@ class Points(commands.Cog):
 
     async def get_log_channel(self, guild: discord.Guild):
         channel_id = await self.manager.log_get(guild.id)
-        if channel_id:
-            channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+        if not channel_id:
+            return None
+        _, channel = await resolve_guild_channel(
+            self.bot, guild.id, channel_id, feature_id="logging"
+        )
+        if channel and channel_can_send(channel, guild):
             return channel
         return None
 
@@ -2421,7 +2426,11 @@ class Points(commands.Cog):
                         embed_desc += f"* {user.mention} (`{user.id}`): **-{amount}** {term}(s)\n"
                     
                     embed = discord.Embed(tite=embed_title, description=embed_desc, color=discord.Color.blue())
-                    await log_ch.send(embed=embed)
+                    try:
+                        await log_ch.send(embed=embed)
+                    except Exception as e:
+                        if is_access_error(e):
+                            await report_access_failure(self.bot, guild_id, "logging")
 
         guild_ids = set()
         for key in self.user_cache:

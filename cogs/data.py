@@ -61,6 +61,7 @@ class Data(commands.Cog):
         self.cached_feature_stats: list[tuple[str, int]] = []
         self.cached_command_stats: list[tuple[str, int]] = []
         self._last_backup_day: Optional[str] = None
+        self._initial_health_done = False
 
     async def cog_load(self):
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -74,6 +75,8 @@ class Data(commands.Cog):
             self.backup_scheduler.start()
         if not self.retention_purge.is_running():
             self.retention_purge.start()
+        if not self._initial_health_done:
+            self.bot.loop.create_task(self._initial_health_pass())
 
     async def cog_unload(self):
         self.export_worker.cancel()
@@ -559,26 +562,36 @@ class Data(commands.Cog):
         except Exception:
             pass
 
+    async def _monitor_guild(self, guild: discord.Guild):
+        for cog in self.iter_data_cogs():
+            if cog is self or not hasattr(cog, "data_monitor_guild"):
+                continue
+            try:
+                result = await cog.data_monitor_guild(guild)
+                if result.actions:
+                    async with self.acquire_db() as db:
+                        for action in result.actions:
+                            await db.execute(
+                                """INSERT INTO monitor_log (guild_id, feature_id, action, detail, created_at)
+                                   VALUES (?, ?, ?, ?, ?)""",
+                                (guild.id, result.feature_id, action, "", int(time.time())),
+                            )
+                        await db.commit()
+            except Exception:
+                pass
+
+    async def _initial_health_pass(self):
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(15)
+        self._initial_health_done = True
+        for guild in list(self.bot.guilds):
+            await self._monitor_guild(guild)
+
     @tasks.loop(hours=1)
     async def health_monitor(self):
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
-            for cog in self.iter_data_cogs():
-                if cog is self or not hasattr(cog, "data_monitor_guild"):
-                    continue
-                try:
-                    result = await cog.data_monitor_guild(guild)
-                    if result.actions:
-                        async with self.acquire_db() as db:
-                            for action in result.actions:
-                                await db.execute(
-                                    """INSERT INTO monitor_log (guild_id, feature_id, action, detail, created_at)
-                                       VALUES (?, ?, ?, ?, ?)""",
-                                    (guild.id, result.feature_id, action, "", int(time.time())),
-                                )
-                            await db.commit()
-                except Exception:
-                    pass
+            await self._monitor_guild(guild)
 
     async def _run_backup(self):
         staging = BACKUP_DIR / ".staging" / str(int(time.time()))
