@@ -20,15 +20,18 @@ class StatusCog(commands.Cog):
         total_members = sum(guild.member_count for guild in self.bot.guilds if guild.member_count)
 
         return [
-            "✨ v3 is here!",
+            "✨ v4 just dropped baby!",
+            "✨ The SuiteCASE Update",
             f"✨ Watching {guild_count} Servers",
             "✨ Watching downfall of GiveawayBot",
-            "✨ Offering premium exp without paywalls",
             f"✨ Watching {user_installs} User-installs",
-            "✨ Enforcing no nickel-&-diming policy",
-            "✨ Powered by Dopamine Framework!",
+            "✨ A charity case?",
+            "✨ Am the open source underdog",
+            "✨ boy are you a dopamine? cuz i wanna make you dopaMINE!"
+            "✨ Powered by Beacon Framework!",
             f"✨ Watching {total_members} Members",
             "✨ Watching downfall of GiveawayBoat",
+            "✨ girl are you dopamine? cuz damn youre dopaFINE!",
             "✨ It's so hard being the best!",
             "✨ Giving Sapphire a hug (aww!)"
         ]
