@@ -9,7 +9,7 @@ Created by **Dopamine Studios**.
 
 Invite Dopamine today by [__clicking here__](https://discord.com/oauth2/authorize?client_id=1411266382380924938).
 
-If you have any questions, suggestions, or issues, you can join the support server by clicking [__here__](https://discord.gg/b3eUjydwcQ)
+If you have any questions, suggestions, or issues, you can join the support server by clicking [__here__](https://discord.gg/b3eUjydwcQ).
 
 # Features
 
@@ -51,7 +51,7 @@ If you have any questions, suggestions, or issues, you can join the support serv
 
 # The Team
 
-Dopamine is developed by **Dopamine Studios**. But as of the 1st of June 2026 i.e. the way I'm writing this, there haven't been any contributions to this project of Dopamine Studios other than me, Smite.
+Dopamine is developed by **Dopamine Studios**. But as of the 1st of June 2026 i.e. the day I'm writing this, there haven't been any contributions to this project of Dopamine Studios other than me, Smite.
 
 # Installation & Setup
 
