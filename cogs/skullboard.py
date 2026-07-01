@@ -299,6 +299,12 @@ class SkullboardCog(commands.Cog):
             await db.execute(f"UPDATE guild_settings SET {set_clause} WHERE guild_id = ?", values)
             await db.commit()
 
+    def get_skull_emoji(self, count: int) -> str:
+        if count >= 15:
+            return "☠"
+
+            return "💀"
+
     async def upsert_skull_post(self, guild_id: int, source_id: int, skullboard_id: int):
         """Update both DB and cache manually for skull posts."""
         if guild_id not in self.skull_posts_cache:
@@ -462,7 +468,8 @@ class SkullboardCog(commands.Cog):
                 return
 
             embed = self.build_skullboard_embed(msg)
-            content_str = f"💀 **{total_count}** | {msg.channel.mention}"
+            dynamic_emoji = self.get_skull_emoji(total_count)
+            content_str = f"{dynamic_emoji} **{total_count}** | {msg.channel.mention}"
 
             try:
                 if existing_id:
@@ -516,7 +523,8 @@ class SkullboardCog(commands.Cog):
             total = count_source + count_sb
 
             embed = self.build_skullboard_embed(after)
-            content_str = f"💀 {total} in {after.channel.mention}"
+            dynamic_emoji = self.get_skull_emoji(total)
+            content_str = f"{dynamic_emoji} {total} | {after.channel.mention}"
             await sbm.edit(content=content_str, embed=embed)
         except:
             pass
