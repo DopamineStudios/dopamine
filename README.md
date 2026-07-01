@@ -15,7 +15,7 @@ If you have any questions, suggestions, or issues, you can join the support serv
 
 ### Moderation & Administration
 
-* Moderation System: A completely customizable moderation system where actions (warn, ban, etc.) are triggered when a defined warning count is reached. Includes warning decay feature, and rejoin policy feature. Also supports Message Reporting.
+* Moderation System: A completely customisable, infraction-case-based moderation system where actions (warn, ban, etc.) are triggered when a defined warning count is reached. Includes infraction cases, warning decay feature, and rejoin policy feature. Also supports Message Reporting.
 
 * Slowmode Scheduler: Schedule slowmode to enable/disable automatically at specific times of the day.
 
