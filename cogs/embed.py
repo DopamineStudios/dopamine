@@ -8,8 +8,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from dopamineframework import PrivateLayoutView, PrivateView, mod_check
+from beacon import PrivateLayoutView, PrivateView, beacon_commands
 from config import EDB_PATH
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 from utils.time import get_now_plus_seconds_unix
 
 
@@ -41,12 +43,12 @@ class Embeds(commands.Cog):
 
     async def cog_unload(self):
         if self.db_pool is not None:
-            closing_tasks = []
             while not self.db_pool.empty():
-                conn = await self.db_pool.get()
-                closing_tasks.append(conn.close())
-            if closing_tasks:
-                await asyncio.gather(*closing_tasks, return_exceptions=True)
+                try:
+                    conn = self.db_pool.get_nowait()
+                    await conn.close()
+                except (asyncio.QueueEmpty, Exception):
+                    break
 
     async def init_pools(self, pool_size: int = 3):
         if self.db_pool is None:
@@ -266,8 +268,39 @@ class Embeds(commands.Cog):
             )
             await db.commit()
 
-    @app_commands.command(name="embed", description="Open the Embed Dashboard.")
-    @app_commands.check(mod_check)
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="embeds",
+            name="Embeds",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="embeds")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="embeds")
+        async with self.acquire_db() as db:
+            embeds = await export_table(db, "SELECT * FROM embeds WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"embeds": embeds}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="embeds")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "embeds":
+            return DataDeleteResult(feature_id="embeds")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM embeds WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        return DataDeleteResult(feature_id="embeds", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="embeds")
+
+    @beacon_commands.command(name="embed", description="Open the Embed Dashboard.", permissions_preset="support")
     async def embed_dashboard_cmd(self, interaction: discord.Interaction):
         view = EmbedDashboard(interaction.user, self)
         await interaction.response.send_message(view=view)
@@ -316,14 +349,12 @@ class EmbedDashboard(PrivateLayoutView):
     async def create_callback(self, interaction: discord.Interaction):
         draft = EmbedDraft(guild_id=interaction.guild.id)
         embed = self.cog.build_embed_from_draft(draft)
-        view = EmbedPreviewView(self.cog, self.user, draft)
 
-        expires = get_now_plus_seconds_unix(1800)
+        expires_ts = get_now_plus_seconds_unix(1800)
+        view = EmbedPreviewView(self.cog, self.user, draft, expires_ts=expires_ts)
+
         await interaction.response.send_message(
-            content=(
-                "This is a preview of your embed. Configure it using the buttons below, then save it.\n"
-                f"This preview expires **<t:{expires}:R>**!"
-            ),
+            content=view.get_formatted_content(),
             embed=embed,
             view=view,
         )
@@ -469,8 +500,6 @@ class ManageEmbedPage(PrivateLayoutView):
         async def callback(interaction: discord.Interaction):
             embed_id = record["id"]
             if self.delete_mode:
-
-
                 await self.cog.delete_embed(self.guild_id, embed_id)
                 self.embeds = [e for e in self.embeds if e["id"] != embed_id]
                 new_total = len(self.embeds)
@@ -481,14 +510,14 @@ class ManageEmbedPage(PrivateLayoutView):
             else:
                 draft = self.cog.build_draft_from_row(record)
                 preview_embed = self.cog.build_embed_from_draft(draft)
-                view = EmbedPreviewView(self.cog, self.user, draft, existing_id=embed_id)
-                expires = get_now_plus_seconds_unix(1800)
+
+
+                expires_ts = get_now_plus_seconds_unix(1800)
+                view = EmbedPreviewView(self.cog, self.user, draft, existing_id=embed_id, parent_view=self,
+                                        expires_ts=expires_ts)
 
                 await interaction.response.send_message(
-                    content=(
-                        "This is a preview of your embed. Configure it using the buttons below, then save it.\n"
-                        f"This preview expires **<t:{expires}:R>**!"
-                    ),
+                    content=view.get_formatted_content(),
                     embed=preview_embed,
                     view=view,
                 )
@@ -729,45 +758,64 @@ class LayoutViewChannelSelect(PrivateLayoutView):
         channel_id = int(interaction.data['values'][0])
         channel = interaction.guild.get_channel(channel_id) or await interaction.guild.fetch_channel(channel_id)
 
-        if channel is None:
+        if not isinstance(channel, discord.TextChannel):
             return await interaction.response.send_message(
-                "I couldn't access that channel. Check my permissions.", ephemeral=True
+                "The selected item is not a text channel. Please select a valid text channel.",
+                ephemeral=True
             )
 
         embed_obj = self.cog.build_embed_from_row(self.embed_record)
         content = self.embed_record.get("content") or None
 
-        await channel.send(content=content, embed=embed_obj)
-        await interaction.response.send_message(
-            f"Embed sent to {channel.mention} successfully.", ephemeral=True
-        )
+        try:
+            await channel.send(content=content, embed=embed_obj)
+            await interaction.response.send_message(
+                f"Embed sent to {channel.mention} successfully.", ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to send messages in that channel.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"An unexpected error occurred: {e}",
+                ephemeral=True
+            )
 
 
 class EmbedPreviewView(PrivateView):
     def __init__(
-        self,
-        cog: Embeds,
-        user: discord.abc.User,
-        draft: EmbedDraft,
-        existing_id: Optional[int] = None,
+            self,
+            cog: Embeds,
+            user: discord.abc.User,
+            draft: EmbedDraft,
+            existing_id: Optional[int] = None,
+            parent_view: Optional[ManageEmbedPage] = None,
+            expires_ts: int = 0,
     ):
         super().__init__(user, timeout=1800)
         self.cog = cog
         self.draft = draft
         self.existing_id = existing_id
+        self.parent_view = parent_view
+        self.expires_ts = expires_ts
         self.message: Optional[discord.Message] = None
 
-    async def on_timeout(self):
-        if self.message:
-            try:
-                expired_embed = discord.Embed(
-                    title="Embed preview expired",
-                    description="This embed preview has expired.",
-                    colour=discord.Colour.red(),
-                )
-                await self.message.edit(content=None, embed=expired_embed, view=None)
-            except discord.HTTPException:
-                pass
+    def get_formatted_content(self) -> str:
+        prefix = (
+            "This is a preview of your embed. Configure it using the buttons below, then save and/or send it.\n"
+            f"This preview expires **<t:{self.expires_ts}:R>**!"
+        )
+        if self.draft.content:
+            return f"{prefix}\n\n{self.draft.content}"
+        return prefix
+
+    async def _update_parent_cache(self):
+        if self.parent_view and self.existing_id:
+            updated_embeds = await self.cog.fetch_embeds_for_guild(self.parent_view.guild_id)
+            self.parent_view.embeds = updated_embeds
+            self.parent_view.build_layout()
 
     @discord.ui.button(label="Save", style=discord.ButtonStyle.green)
     async def save_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -778,6 +826,9 @@ class EmbedPreviewView(PrivateView):
             existing_id=self.existing_id,
         )
         self.existing_id = embed_id
+
+        await self._update_parent_cache()
+
         await interaction.response.edit_message(content=f"Embed saved successfully.", embed=None, view=None)
 
     @discord.ui.button(label="Save & Send", style=discord.ButtonStyle.blurple)
@@ -790,8 +841,11 @@ class EmbedPreviewView(PrivateView):
         )
         self.existing_id = embed_id
 
+        await self._update_parent_cache()
+
         view = ViewChannelSelect(self.cog, self.draft)
-        await interaction.response.edit_message(content="## Select the channel where you want the embed to be sent:", embed=None, view=view)
+        await interaction.response.edit_message(content="## Select the channel where you want the embed to be sent:",
+                                                embed=None, view=view)
 
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary)
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -837,19 +891,32 @@ class ViewChannelSelect(discord.ui.View):
     async def select_channel(self, interaction: discord.Interaction):
         channel_id = self.select.values[0].id
         ch = self.cog.bot.get_channel(channel_id) or await interaction.guild.fetch_channel(channel_id)
-        if ch is None or not isinstance(ch, discord.abc.Messageable):
+
+        if not isinstance(ch, discord.TextChannel):
             return await interaction.response.send_message(
-                "I can't access that channel or it's not a text channel.",
+                "The selected item is not a text channel.",
                 ephemeral=True
             )
-        embed_obj = self.cog.build_embed_from_draft(self.draft)
-        await ch.send(content=self.draft.content or None, embed=embed_obj)
 
-        await interaction.response.edit_message(
-            content=f"Embed sent to {ch.mention} successfully.",
-            embed=None,
-            view=None,
-        )
+        try:
+            embed_obj = self.cog.build_embed_from_draft(self.draft)
+            await ch.send(content=self.draft.content or None, embed=embed_obj)
+
+            await interaction.response.edit_message(
+                content=f"Embed sent to {ch.mention} successfully.",
+                embed=None,
+                view=None,
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to send messages in that channel.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"An error occurred: {e}",
+                ephemeral=True
+            )
 
 
 class EmbedEditSelect(discord.ui.Select):
@@ -932,8 +999,10 @@ class EmbedEditSelect(discord.ui.Select):
         if value == "timestamp":
             self.draft.timestamp_enabled = not self.draft.timestamp_enabled
             new_embed = self.cog.build_embed_from_draft(self.draft)
+
             await self.parent_view.message.edit(
-                content=self.draft.content or None, embed=new_embed
+                content=self.parent_view.get_formatted_content(),
+                embed=new_embed
             )
             state = "enabled" if self.draft.timestamp_enabled else "disabled"
             return await interaction.response.send_message(
@@ -1036,8 +1105,9 @@ class EmbedFieldModal(discord.ui.Modal):
             self.draft.author_icon_url = value
 
         new_embed = self.parent_view.cog.build_embed_from_draft(self.draft)
+
         await self.parent_view.message.edit(
-            content=self.draft.content or None,
+            content=self.parent_view.get_formatted_content(),
             embed=new_embed,
         )
 

@@ -2,9 +2,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from utils.log import LoggingManager
-from dopamineframework import mod_check
 from discord.ui import Button, View, TextDisplay
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView, beacon_commands
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class DestructiveConfirmationView(PrivateLayoutView):
@@ -78,9 +80,8 @@ class Logging(commands.Cog):
         if self.manager:
             await self.manager.close_pools()
 
-    log = app_commands.Group(name="logging", description="Manage logging feature.")
+    log = beacon_commands.Group(name="logging", description="Manage logging feature.", permissions_preset="security")
     @log.command(name="set", description="Set the logging channel for logs.")
-    @app_commands.check(mod_check)
     @app_commands.describe(channel="Channel to use for logs")
     async def setlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
         already = await self.manager.log_get(interaction.guild.id)
@@ -91,24 +92,30 @@ class Logging(commands.Cog):
             description=f"All moderation logs will now be sent here.",
             color=discord.Color(0x944ae8)
         )
-        embed.set_footer(text=f"Set by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text=f"Set by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
         channel = self.bot.get_channel(channel.id) or await self.bot.fetch_channel(channel.id)
         if not channel:
             return await interaction.response.send_message("I can't find the channel that you set for logging! Please ensure I have the necessary permissions.", ephemeral=True)
-        await channel.send(embed=embed)
+        try:
+            await channel.send(embed=embed)
+        except Exception as e:
+            if is_access_error(e):
+                await report_access_failure(self.bot, interaction.guild.id, "logging")
+            return await interaction.response.send_message(
+                "I can't send messages in that channel. Please check my permissions.",
+                ephemeral=True,
+            )
         await interaction.response.send_message(embed=discord.Embed(
             title=f"{"Logging has been enabled" if already else "Logging Channel Updated"}",
             description=f"Log channel set to {channel.mention}",
             color=discord.Color.green()), ephemeral=True)
 
     @log.command(name="get", description="Check what channel is set as the logging channel.")
-    @app_commands.check(mod_check)
     async def getlog(self, interaction: discord.Interaction):
         channel_id = await self.manager.log_get(interaction.guild.id)
         await interaction.response.send_message(f"The logging channel is currently set to <#{channel_id}>.", ephemeral=True)
 
     @log.command(name="test", description="Test whether the bot can access the logging channel or not.")
-    @app_commands.check(mod_check)
     async def testlog(self, interaction: discord.Interaction):
         channel_id = await self.manager.log_get(interaction.guild.id)
         if not channel_id:
@@ -121,11 +128,18 @@ class Logging(commands.Cog):
         embed = discord.Embed(title="Beep, boop!",
                               description=f"This is a test message to test whether logging works or not.",
                               color=discord.Colour.blue())
-        await channel.send(embed=embed)
+        try:
+            await channel.send(embed=embed)
+        except Exception as e:
+            if is_access_error(e):
+                await report_access_failure(self.bot, interaction.guild.id, "logging")
+            return await interaction.response.send_message(
+                "I can't send messages in the logging channel. Please check my permissions.",
+                ephemeral=True,
+            )
         await interaction.response.send_message("Test message has been sent successfully!", ephemeral=True)
 
     @log.command(name="disable", description="Disable logging and delete logging channel for this server from database.")
-    @app_commands.check(mod_check)
     async def deletelog(self, interaction: discord.Interaction):
         exists = await self.manager.log_get(interaction.guild.id)
         if not exists:
@@ -139,5 +153,64 @@ class Logging(commands.Cog):
 
         if view.value is True:
             await self.manager.log_remove(interaction.guild_id)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="logging",
+            name="Logging",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="logging")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="logging")
+        async with self.manager.acquire_db() as db:
+            rows = await export_table(
+                db,
+                "SELECT guild_id, channel_id FROM log_channels WHERE guild_id = ?",
+                (guild_id,),
+            )
+        if rows:
+            chunk.guild_data[guild_id] = rows[0]
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="logging")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "logging":
+            return DataDeleteResult(feature_id="logging")
+        existed = await self.manager.log_get(guild_id)
+        if not existed:
+            return DataDeleteResult(feature_id="logging")
+        await self.manager.log_remove(guild_id)
+        return DataDeleteResult(feature_id="logging", deleted=True, rows_affected=1)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="logging")
+        channel_id = await self.manager.log_get(guild.id)
+        if not channel_id:
+            return result
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = None
+        accessible = (
+            channel is not None
+            and isinstance(channel, discord.abc.GuildChannel)
+            and channel.guild.id == guild.id
+            and channel.permissions_for(guild.me).view_channel
+            and channel.permissions_for(guild.me).send_messages
+        )
+        if not accessible:
+            await self.manager.log_remove(guild.id)
+            result.actions.append("disabled_logging")
+        return result
+
 async def setup(bot):
     await bot.add_cog(Logging(bot))

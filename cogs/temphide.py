@@ -8,6 +8,9 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional, Dict
 from config import TDB_PATH
+from beacon import beacon_commands
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 
 class TempHideCog(commands.Cog):
@@ -114,6 +117,102 @@ class TempHideCog(commands.Cog):
             return (data["user_id"], data["hidden_text"])
         return None
 
+    async def _resolve_message_guild_id(self, message_id: int) -> Optional[int]:
+        for guild in self.bot.guilds:
+            for channel in guild.text_channels:
+                if not channel.permissions_for(guild.me).view_channel:
+                    continue
+                try:
+                    await channel.fetch_message(message_id)
+                    return guild.id
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    continue
+        return None
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="temphide",
+            name="TempHide",
+            user_export=True,
+            user_delete=True,
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="temphide")
+        async with self.acquire_db() as db:
+            rows = await export_table(
+                db, "SELECT * FROM temp_messages WHERE user_id = ?", (user_id,))
+        for row in rows:
+            gid = await self._resolve_message_guild_id(row["message_id"])
+            if gid is None:
+                chunk.global_data.setdefault("messages", []).append(row)
+            elif guild_ids is None or gid in guild_ids:
+                chunk.guild_data.setdefault(gid, {}).setdefault("messages", []).append(row)
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="temphide")
+        messages = []
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM temp_messages", ())
+        for row in rows:
+            gid = await self._resolve_message_guild_id(row["message_id"])
+            if gid == guild_id:
+                messages.append(row)
+        chunk.guild_data[guild_id] = {"messages": messages}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "temphide":
+            return DataDeleteResult(feature_id="temphide")
+        rows_affected = 0
+        if guild_ids is None:
+            async with self.acquire_db() as db:
+                cur = await db.execute("DELETE FROM temp_messages WHERE user_id = ?", (user_id,))
+                rows_affected = cur.rowcount
+                await db.commit()
+            for mid, data in list(self.message_cache.items()):
+                if data["user_id"] == user_id:
+                    del self.message_cache[mid]
+        else:
+            async with self.acquire_db() as db:
+                rows = await export_table(
+                    db, "SELECT message_id FROM temp_messages WHERE user_id = ?", (user_id,))
+            for row in rows:
+                gid = await self._resolve_message_guild_id(row["message_id"])
+                if gid not in guild_ids:
+                    continue
+                async with self.acquire_db() as db:
+                    await db.execute(
+                        "DELETE FROM temp_messages WHERE message_id = ?", (row["message_id"],))
+                    await db.commit()
+                self.message_cache.pop(row["message_id"], None)
+                rows_affected += 1
+        return DataDeleteResult(feature_id="temphide", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "temphide":
+            return DataDeleteResult(feature_id="temphide")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT message_id FROM temp_messages", ())
+        for row in rows:
+            gid = await self._resolve_message_guild_id(row["message_id"])
+            if gid != guild_id:
+                continue
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "DELETE FROM temp_messages WHERE message_id = ?", (row["message_id"],))
+                await db.commit()
+            self.message_cache.pop(row["message_id"], None)
+            rows_affected += 1
+        return DataDeleteResult(feature_id="temphide", deleted=True, rows_affected=rows_affected)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="temphide")
+
 
     @staticmethod
     async def send_error_reply(interaction_or_ctx, embed=None, message=None, ephemeral=True):
@@ -165,7 +264,7 @@ class TempHideCog(commands.Cog):
             embed = discord.Embed(title="Error", description="Failed to create message.", color=discord.Color.red())
             await self.send_error_reply(interaction_or_ctx, embed=embed)
 
-    @app_commands.command(name="temphide", description="Send a hidden message that only you can reveal")
+    @beacon_commands.command(name="temphide", description="Send a hidden message that only you can reveal")
     async def temphide_slash(self, interaction: discord.Interaction, message: str):
         await self.handle_temphide(interaction, message)
 

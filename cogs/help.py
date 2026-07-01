@@ -5,6 +5,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from beacon import beacon_commands
+
 EMBED_COLOR = discord.Color(0x944ae8)
 VOTE_URL = "https://top.gg/bot/1411266382380924938/vote"
 SUPPORT_URL = "https://discord.gg/VWDcymz648"
@@ -129,23 +131,27 @@ class HelpCog(commands.Cog):
         )
 
         moderation_description = (
-            "Dopamine replaces traditional mute/kick/ban commands with a **12-point escalation system**. "
-            "Moderators assign points, and the bot handles the math and the punishment automatically.\n\n"
+            "Dopamine replaces traditional mute/kick/ban commands with a completely customizable 5-strike escalation system. "
+            "Moderators assign warnings, and the bot handles the math and the punishment automatically based on what punishment you've set for the specific warning count.\n\n"
             "**Punishment Logic (Customizable via `/moderation dashboard`):**\n"
             "• 1 Warning: Official Warning\n"
             "• 2 Warnings: 60-minute mute/timeout\n"
             "• 3 Warnings: 12-hour ban\n"
-            "• 4 Warnings: 7-day Ban\n• 5 Warnings: Permanent Ban\n> The points system is completely customizable, and you can customize point amounts for each action or disable an action completely.\n\n"
+            "• 4 Warnings: 7-day Ban\n• 5 Warnings: Permanent Ban\n> The moderation system is completely customizable, and you can customize warnings amounts for each action, create new actions with custom punishment, durations, and warning counts, and delete existing ones.\n\n"
             
             "**Core Mechanics:**\n"
-            "• **Decay:** Points drop by 1 every two weeks (can be customized) if no new infractions occur.\n"
-            "• **Rejoin:** Users unbanned via the bot start at 4 points (can be customized) to prevent immediate repeat offenses."
+            "• **Decay:** Warnings drop by 1 every two weeks (can be customized) if no new infractions occur.\n"
+            "• **Rejoin:** Users unbanned via the bot start at 4 warnings (can be customized) to prevent immediate repeat offenses."
         )
         page2 = create_base_embed("Automated Moderation", moderation_description)
         page2.add_field(name="Management Commands", value=(
             "`/warn` • Add warnings & trigger auto-punishment\n"
-            "`/pardon` • Remove points from a user history\n"
-            "`/warnings` • View current warnings total and history\n"
+            "`/pardon` • Remove warnings/points from a user\n"
+            "`/warnings` • View current warnings/points total\n"
+            "`/case history` • View full infraction history for a user\n"
+            "`/case view` • View a specific case by ID\n"
+            "`/case all` • Browse all active warnings/points with live leaderboard\n"
+            "`/case delete` • Delete a case and adjust warnings/points\n"
             "`/unban` • Unban a user."
         ), inline=False)
         page2.add_field(name="Nickname Moderator", value=(
@@ -264,7 +270,7 @@ class HelpCog(commands.Cog):
         embeds_map = self._build_embeds()
         await ctx.send(embed=embeds_map["Home"], view=HelpView(ctx.author, embeds_map, self.bot))
 
-    @app_commands.command(name="help", description="Show the bot help menu with category navigation.")
+    @beacon_commands.command(name="help", description="Show the bot help menu with category navigation.")
     async def help_slash(self, interaction: discord.Interaction):
         embeds_map = self._build_embeds()
         await interaction.response.send_message(embed=embeds_map["Home"], view=HelpView(interaction.user, embeds_map, self.bot))

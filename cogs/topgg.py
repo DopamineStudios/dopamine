@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from typing import Optional, Dict, Tuple, Set
 from config import TOPDB_PATH, TOPGG_API_URL, TOPGG_TOKEN
 from config import OVERRIDE_VOTEWALL
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 TOPGG_BOT_TOKEN = TOPGG_TOKEN
 VOTE_CHECK_COOLDOWN = timedelta(hours=12, minutes=30)
@@ -188,6 +190,43 @@ class TopGGVoter(commands.Cog):
                 (cutoff_date.isoformat(), cutoff_date.isoformat())
             )
         await self.populate_caches()
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="topgg",
+            name="Top.gg Voting",
+            user_export=True,
+            user_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="topgg")
+        async with self.acquire_db() as db:
+            rows = await export_table(
+                db,
+                "SELECT user_id, voted_at, last_checked FROM voters WHERE user_id = ?",
+                (user_id,),
+            )
+        if rows:
+            chunk.global_data["voter_record"] = rows[0]
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        return DataExportChunk(feature_id="topgg")
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "topgg":
+            return DataDeleteResult(feature_id="topgg")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM voters WHERE user_id = ?", (user_id,))
+        self.voter_cache.pop(user_id, None)
+        return DataDeleteResult(feature_id="topgg", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="topgg")
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="topgg")
 
 
 async def setup(bot):

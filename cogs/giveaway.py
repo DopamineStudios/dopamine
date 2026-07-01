@@ -9,9 +9,12 @@ import asyncio
 import aiosqlite
 from datetime import datetime, timezone
 from discord.ui import TextDisplay
-from dopamineframework import PrivateLayoutView, PrivateView, mod_check
+from beacon import PrivateLayoutView, PrivateView, beacon_commands
 
 from config import GDB_PATH
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 from utils.time import get_duration_to_seconds, get_now_plus_seconds_unix
 from natsort import natsorted, ns
 
@@ -1600,13 +1603,12 @@ class Giveaways(commands.Cog):
         self.check_giveaways.cancel()
 
         if self.db_pool is not None:
-            closing_tasks = []
             while not self.db_pool.empty():
-                conn = await self.db_pool.get()
-                closing_tasks.append(conn.close())
-
-            if closing_tasks:
-                await asyncio.gather(*closing_tasks, return_exceptions=True)
+                try:
+                    conn = self.db_pool.get_nowait()
+                    await conn.close()
+                except (asyncio.QueueEmpty, Exception):
+                    break
 
     async def init_pools(self, pool_size: int = 5):
         if self.db_pool is None:
@@ -1786,11 +1788,25 @@ class Giveaways(commands.Cog):
                             pool.append(user_id)
 
         if not pool:
-            channel = self.bot.get_channel(g['channel_id']) or await self.bot.fetch_channel(g['channel_id'])
+            channel = self.bot.get_channel(g['channel_id'])
+            try:
+                if channel is None:
+                    channel = await self.bot.fetch_channel(g['channel_id'])
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild_id, "giveaway", f"giveaway:{giveaway_id}")
+                await self.mark_as_ended(giveaway_id, guild_id, 'participant_cache')
+                return
             if channel:
-                await channel.send(embed=discord.Embed(title="Giveaway Ended",
-                                                       description=f"Giveaway for **{g['prize']}** ended with no participants.",
-                                                       colour=discord.Colour.red()))
+                try:
+                    await channel.send(embed=discord.Embed(
+                        title="Giveaway Ended",
+                        description=f"Giveaway for **{g['prize']}** ended with no participants.",
+                        colour=discord.Colour.red(),
+                    ))
+                except Exception as e:
+                    if is_access_error(e):
+                        await report_access_failure(self.bot, guild_id, "giveaway", f"giveaway:{giveaway_id}")
             await self.mark_as_ended(giveaway_id, guild_id, 'participant_cache')
             return
 
@@ -1850,7 +1866,9 @@ class Giveaways(commands.Cog):
 
                                 await asyncio.sleep(1.5)
 
-            except Exception:
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild_id, "giveaway", f"giveaway:{giveaway_id}")
                 return
 
     async def mark_as_ended(self, giveaway_id: int, guild_id: int, whichone: str):
@@ -2168,25 +2186,20 @@ class Giveaways(commands.Cog):
 
         return choices[:25]
 
-    giveaway = app_commands.Group(name="giveaway", description="Commands for Dopamine's giveaway features.")
+    giveaway = beacon_commands.Group(name="giveaway", description="Commands for Dopamine's giveaway features.", permissions_preset="giveaways")
 
     @giveaway.command(name="create", description="Start the giveaway creation process.")
-    @app_commands.check(mod_check)
     async def create(self, interaction: discord.Interaction):
         view = CreateChoose(self, interaction.user)
         await interaction.response.send_message(view=view)
 
     @giveaway.command(name="template", description="Open the Giveaway Template Homepage.")
-    @app_commands.check(mod_check)
     async def template_cmd(self, interaction: discord.Interaction):
         view = TemplateHomepage(self, interaction.user)
         await interaction.response.send_message(view=view)
 
-    @app_commands.command(name="zr", description=".")
+    @beacon_commands.command(name="zr", description=".", permissions_preset="bot_owner")
     async def set_review_channel(self, interaction: discord.Interaction):
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message("🤫", ephemeral=True)
-            return
         async with self.acquire_db() as db:
             await db.execute("INSERT OR REPLACE INTO review_config (guild_id, channel_id) VALUES (?, ?)",
                              (interaction.guild.id, interaction.channel.id))
@@ -2195,7 +2208,6 @@ class Giveaways(commands.Cog):
                                                 ephemeral=True)
 
     @giveaway.command(name="end", description="End an active giveaway (winners are also picked and mentioned).")
-    @app_commands.check(mod_check)
     @app_commands.describe(giveaway_id="The ID of the giveaway to end.")
     async def giveaway_end(self, interaction: discord.Interaction, giveaway_id: str):
         try:
@@ -2222,7 +2234,6 @@ class Giveaways(commands.Cog):
         return await self.giveaway_autocomplete(interaction, current, magic=True)
 
     @giveaway.command(name="delete", description="Delete a giveaway permanently from the database.")
-    @app_commands.check(mod_check)
     @app_commands.describe(giveaway_id="The ID of the giveaway to delete.")
     async def giveaway_delete(self, interaction: discord.Interaction, giveaway_id: str):
         try:
@@ -2265,7 +2276,6 @@ class Giveaways(commands.Cog):
         return await self.giveaway_autocomplete(interaction, current, magic=False)
 
     @giveaway.command(name="reroll", description="Reroll a giveaway.")
-    @app_commands.check(mod_check)
     @app_commands.describe(giveaway_id="The ID of the giveaway to reroll.", winners="Number of new winners to pick",
                            preserve_winners="Keep previous winners and just add new ones?")
     async def giveaway_reroll(self, interaction: discord.Interaction, giveaway_id: int, winners: int = 1,
@@ -2390,7 +2400,6 @@ class Giveaways(commands.Cog):
         return await self.giveaway_autocomplete(interaction, current, magic=False)
 
     @giveaway.command(name="list", description="List all giveaways in this server.")
-    @app_commands.check(mod_check)
     async def giveaway_list(self, interaction: discord.Interaction):
         await interaction.response.defer()
         async with self.acquire_db() as db:
@@ -2417,6 +2426,171 @@ class Giveaways(commands.Cog):
             color=discord.Color(0x944ae8)
         )
         await interaction.edit_original_response(embed=embed)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="giveaway",
+            name="Giveaways",
+            user_export=True,
+            user_delete=True,
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="giveaway")
+        async with self.acquire_db() as db:
+            if guild_ids is None:
+                participants = await export_table(
+                    db, "SELECT * FROM giveaway_participants WHERE user_id = ?", (user_id,))
+                winners = await export_table(
+                    db,
+                    """SELECT w.*, g.guild_id FROM giveaway_winners w
+                       JOIN giveaways g ON g.giveaway_id = w.giveaway_id
+                       WHERE w.user_id = ?""",
+                    (user_id,),
+                )
+                hosted = await export_table(
+                    db, "SELECT * FROM giveaways WHERE host_id = ?", (user_id,))
+            else:
+                placeholders = ",".join("?" * len(guild_ids))
+                params = (user_id, *guild_ids)
+                participants = await export_table(
+                    db,
+                    f"SELECT * FROM giveaway_participants WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    params,
+                )
+                winners = await export_table(
+                    db,
+                    f"""SELECT w.*, g.guild_id FROM giveaway_winners w
+                        JOIN giveaways g ON g.giveaway_id = w.giveaway_id
+                        WHERE w.user_id = ? AND g.guild_id IN ({placeholders})""",
+                    params,
+                )
+                hosted = await export_table(
+                    db,
+                    f"SELECT * FROM giveaways WHERE host_id = ? AND guild_id IN ({placeholders})",
+                    params,
+                )
+        for row in participants:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {}).setdefault("participations", []).append(row)
+        for row in winners:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {}).setdefault("wins", []).append(row)
+        for row in hosted:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {}).setdefault("hosted_giveaways", []).append(row)
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="giveaway")
+        async with self.acquire_db() as db:
+            giveaways = await export_table(db, "SELECT * FROM giveaways WHERE guild_id = ?", (guild_id,))
+            participants = await export_table(
+                db, "SELECT * FROM giveaway_participants WHERE guild_id = ?", (guild_id,))
+            winners = await export_table(
+                db,
+                """SELECT w.* FROM giveaway_winners w
+                   JOIN giveaways g ON g.giveaway_id = w.giveaway_id
+                   WHERE g.guild_id = ?""",
+                (guild_id,),
+            )
+            templates = await export_table(
+                db, "SELECT * FROM templates WHERE creation_guild_id = ?", (guild_id,))
+            review = await export_table(db, "SELECT * FROM review_config WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {
+            "giveaways": giveaways,
+            "participants": participants,
+            "winners": winners,
+            "templates": templates,
+            "review_config": review,
+        }
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "giveaway":
+            return DataDeleteResult(feature_id="giveaway")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            if guild_ids is None:
+                cur = await db.execute("DELETE FROM giveaway_participants WHERE user_id = ?", (user_id,))
+                rows_affected += cur.rowcount
+                cur = await db.execute("DELETE FROM giveaway_winners WHERE user_id = ?", (user_id,))
+                rows_affected += cur.rowcount
+            else:
+                placeholders = ",".join("?" * len(guild_ids))
+                params = (user_id, *guild_ids)
+                cur = await db.execute(
+                    f"DELETE FROM giveaway_participants WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    params,
+                )
+                rows_affected += cur.rowcount
+                cur = await db.execute(
+                    f"""DELETE FROM giveaway_winners WHERE user_id = ? AND giveaway_id IN (
+                        SELECT giveaway_id FROM giveaways WHERE guild_id IN ({placeholders}))""",
+                    (user_id, *guild_ids),
+                )
+                rows_affected += cur.rowcount
+            await db.commit()
+        for giveaway_id, participants in list(self.participant_cache.items()):
+            if user_id in participants:
+                participants.discard(user_id)
+        return DataDeleteResult(feature_id="giveaway", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "giveaway":
+            return DataDeleteResult(feature_id="giveaway")
+        rows_affected = 0
+        giveaway_ids = []
+        async with self.acquire_db() as db:
+            async with db.execute("SELECT giveaway_id FROM giveaways WHERE guild_id = ?", (guild_id,)) as cur:
+                giveaway_ids = [r[0] async for r in cur]
+            if giveaway_ids:
+                placeholders = ",".join("?" * len(giveaway_ids))
+                cur = await db.execute(
+                    f"DELETE FROM giveaway_winners WHERE giveaway_id IN ({placeholders})", giveaway_ids)
+                rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM giveaway_participants WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM giveaways WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM templates WHERE creation_guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM review_config WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        for gid in giveaway_ids:
+            self.giveaway_cache.pop(gid, None)
+            self.participant_cache.pop(gid, None)
+        return DataDeleteResult(feature_id="giveaway", deleted=True, rows_affected=rows_affected)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="giveaway")
+        async with self.acquire_db() as db:
+            async with db.execute(
+                "SELECT giveaway_id, channel_id FROM giveaways WHERE guild_id = ? AND ended = 0",
+                (guild.id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        for giveaway_id, channel_id in rows:
+            channel = guild.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    channel = None
+            accessible = (
+                channel is not None
+                and isinstance(channel, discord.abc.GuildChannel)
+                and channel.guild.id == guild.id
+                and channel.permissions_for(guild.me).view_channel
+                and channel.permissions_for(guild.me).read_message_history
+            )
+            if not accessible:
+                await self.end_giveaway(giveaway_id, guild.id)
+                result.actions.append(f"ended_giveaway:{giveaway_id}")
+        return result
 
 
 async def setup(bot):

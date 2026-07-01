@@ -8,7 +8,10 @@ from typing import Optional, Dict, Set, Tuple, Any
 import time
 from contextlib import asynccontextmanager
 from config import SDB_PATH
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView, beacon_commands
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class ThresholdModal(discord.ui.Modal, title="Edit Star Threshold"):
@@ -327,6 +330,16 @@ class StarboardCog(commands.Cog):
             await db.execute(f"UPDATE guild_settings SET {set_clause} WHERE guild_id = ?", values)
             await db.commit()
 
+    def get_star_emoji(self, count: int) -> str:
+        if count >= 15:
+            return "✨"
+        elif count >= 10:
+            return "💫"
+        elif count >= 5:
+            return "🌟"
+        else:
+            return "⭐"
+
     async def upsert_star_post(self, guild_id: int, source_id: int, starboard_id: int):
         """Update both DB and cache manually for star posts."""
         if guild_id not in self.star_posts_cache:
@@ -427,7 +440,11 @@ class StarboardCog(commands.Cog):
                 description=f"**Created by:** {creator.mention if creator else 'Unknown User'}",
                 color=discord.Color.green()
             )
-            await message.channel.send(content=mentions, embed=embed)
+            try:
+                await message.channel.send(content=mentions, embed=embed)
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(self.bot, message.guild.id, "starboard", "lfg")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -494,7 +511,9 @@ class StarboardCog(commands.Cog):
             if not sbc:
                 try:
                     sbc = await guild.fetch_channel(sb_id)
-                except discord.NotFound:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+                    if is_access_error(e):
+                        await report_access_failure(self.bot, guild.id, "starboard", str(sb_id))
                     return
 
             if existing_id:
@@ -522,18 +541,23 @@ class StarboardCog(commands.Cog):
                 return
 
             embed = self.build_starboard_embed(msg)
-            content_str = f"⭐ **{total_count}** | {msg.channel.mention}"
+            dynamic_emoji = self.get_star_emoji(total_count)
+            content_str = f"{dynamic_emoji} **{total_count}** | {msg.channel.mention}"
 
-            if existing_id:
-                try:
-                    sbm = await sbc.fetch_message(existing_id)
-                    await sbm.edit(content=content_str, embed=embed)
-                except discord.NotFound:
+            try:
+                if existing_id:
+                    try:
+                        sbm = await sbc.fetch_message(existing_id)
+                        await sbm.edit(content=content_str, embed=embed)
+                    except discord.NotFound:
+                        new_sbm = await sbc.send(content=content_str, embed=embed)
+                        await self.upsert_star_post(guild.id, msg.id, new_sbm.id)
+                else:
                     new_sbm = await sbc.send(content=content_str, embed=embed)
                     await self.upsert_star_post(guild.id, msg.id, new_sbm.id)
-            else:
-                new_sbm = await sbc.send(content=content_str, embed=embed)
-                await self.upsert_star_post(guild.id, msg.id, new_sbm.id)
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild.id, "starboard", str(sb_id))
 
         finally:
             self._starboard_tasks.pop(payload.message_id, None)
@@ -572,13 +596,13 @@ class StarboardCog(commands.Cog):
             total = count_source + count_sb
 
             embed = self.build_starboard_embed(after)
-            content_str = f"⭐️ {total} in {after.channel.mention}"
+            dynamic_emoji = self.get_star_emoji(total)
+            content_str = f"{dynamic_emoji} {total} | {after.channel.mention}"
             await sbm.edit(content=content_str, embed=embed)
         except:
             pass
 
-    @app_commands.command(name="starboard", description="Configure the Starboard via Dashboard")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @beacon_commands.command(name="starboard", description="Configure the Starboard via Dashboard", permissions_preset="automation")
     async def starboard_dashboard(self, interaction: discord.Interaction):
         await self.get_guild_settings(interaction.guild.id)
         view = StarboardDashboard(interaction.user, self, interaction.guild.id)
@@ -603,6 +627,70 @@ class StarboardCog(commands.Cog):
 
         channel = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
         channel.send(content=content_str, embed=embed)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="starboard",
+            name="Starboard",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="starboard")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="starboard")
+        async with self.acquire_db() as db:
+            settings = await export_table(
+                db, "SELECT * FROM guild_settings WHERE guild_id = ?", (guild_id,))
+            posts = await export_table(
+                db, "SELECT * FROM star_posts WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"settings": settings, "star_posts": posts}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="starboard")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "starboard":
+            return DataDeleteResult(feature_id="starboard")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM star_posts WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM guild_settings WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        self.settings_cache.pop(guild_id, None)
+        self.star_posts_cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="starboard", deleted=True, rows_affected=rows_affected)
+
+    async def _board_channel_accessible(self, guild: discord.Guild, channel_id: int | None) -> bool:
+        if not channel_id:
+            return True
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.send_messages and perms.embed_links
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="starboard")
+        settings = self.settings_cache.get(guild.id)
+        if not settings or not settings.get("enabled"):
+            return result
+        channel_id = settings.get("starboard_channel_id")
+        if await self._board_channel_accessible(guild, channel_id):
+            return result
+        await self.update_guild_setting(guild.id, enabled=0)
+        result.actions.append("disabled_starboard")
+        return result
 
 
 async def setup(bot):

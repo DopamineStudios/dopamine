@@ -8,7 +8,11 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 TOPGG_TOKEN = os.getenv("TOPGG_TOKEN")
 OVERRIDE_VOTEWALL = os.getenv("OVERRIDE_VOTEWALL", True)
-LOGGING_DEBUG_MODE = os.getenv("LOGGING_DEBUG_MODE", False)
+DEBUG_MODE = os.getenv("LOGGING_DEBUG_MODE")
+if DEBUG_MODE.lower() == "true":
+    LOGGING_DEBUG_MODE = True
+else:
+    LOGGING_DEBUG_MODE = False
 HEARTBEAT_URL = os.getenv("HEARTBEAT_URL", None)
 if not TOKEN:
     raise SystemExit("Set DISCORD_TOKEN in .env")
@@ -53,10 +57,13 @@ SPDB_PATH = str(BASE_DIR / "databases" / "selfpurge.db")
 BAN_PATH = str(BASE_DIR / "databases" / "ban.db")
 DP_PATH = str(BASE_DIR / "databases" / "discordphone.db")
 DDB_PATH = str(BASE_DIR / "databases" / "daily.db")
-WORDS_PATH = str(BASE_DIR / "databases" / "words_list.txt")
 EDB_PATH = str(BASE_DIR / "databases" / "embeds.db")
 ARSPDB_PATH = str(BASE_DIR / "databases" / "autoresponse.db")
 AFKDB_PATH = str(BASE_DIR / "databases" / "afk.db")
+TOURNEYDB_PATH = str(BASE_DIR / "databases" / "tournaments.db")
+DATADB_PATH = str(BASE_DIR / "databases" / "data.db")
+DATABASES_DIR = BASE_DIR / "databases"
+BACKUP_DIR = BASE_DIR / "backup"
 
 # Top.gg settings
 TOPGG_API_URL = "https://top.gg/api/bots/{bot_id}/check"

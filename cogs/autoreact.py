@@ -7,9 +7,12 @@ import time
 import re
 from typing import Optional, List, Dict, Tuple, Set, Any
 from contextlib import asynccontextmanager
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView, beacon_commands
 from config import ARDB_PATH
-from dopamineframework import mod_check
+import emoji
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 EMOJI_REGEX = re.compile(
     r'(<a?:\w{2,32}:\d{15,25}>)'
@@ -313,7 +316,7 @@ class EditPage(PrivateLayoutView):
         is_image_only = bool(self.panel['image_only_mode'])
 
         whitelist_count = len(self.cog.whitelist_cache.get((self.panel['guild_id'], self.panel['panel_id']),
-                                                           [])) if is_whitelist else "All users"
+                                                           [])) if is_whitelist else "All"
 
         container = discord.ui.Container()
         container.add_item((discord.ui.TextDisplay(f"Edit: {self.panel['name']}")))
@@ -323,7 +326,7 @@ class EditPage(PrivateLayoutView):
             f"**State:** {'🟢 Active' if is_active else '🔴 Inactive'}\n"
             f"**Emojis:** {self.cog.format_emojis_for_display(self.panel['emoji_list'])}\n"
             f"**Channel:** <#{self.panel['channel_id']}>\n"
-            f"**Target:** {whitelist_count}\n"
+            f"**Target:** {whitelist_count} Members\n"
             f"**Mode:** {'Image-only' if is_image_only else 'All Messages'}\n"
         )
         container.add_item(discord.ui.TextDisplay(details))
@@ -735,6 +738,7 @@ class AutoReact(commands.Cog):
 
     def parse_emoji_input(self, emoji_input: str) -> List[str]:
         if not emoji_input: return []
+        emoji_input = emoji.emojize(emoji_input, language='alias')
         tokens = []
         parts = [p.strip() for p in re.split(r'[,\s]+', emoji_input) if p.strip()]
         for part in parts:
@@ -773,11 +777,79 @@ class AutoReact(commands.Cog):
         self.panel_cache.pop(key, None)
         self.whitelist_cache.pop(key, None)
 
-    @app_commands.command(name="autoreact", description="Manage AutoReact panels via dashboard")
-    @app_commands.check(mod_check)
+    @beacon_commands.command(name="autoreact", description="Manage AutoReact panels via dashboard", permissions_preset="automations")
     async def autoreact_dashboard_cmd(self, interaction: discord.Interaction):
         view = AutoreactDashboard(interaction.user, self)
         await interaction.response.send_message(view=view)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="autoreact",
+            name="AutoReact",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="autoreact")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="autoreact")
+        async with self.acquire_db() as db:
+            panels = await export_table(
+                db, "SELECT * FROM autoreact_panels WHERE guild_id = ?", (guild_id,))
+            whitelist = await export_table(
+                db, "SELECT * FROM autoreact_whitelist WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"panels": panels, "whitelist": whitelist}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="autoreact")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "autoreact":
+            return DataDeleteResult(feature_id="autoreact")
+        rows_affected = 0
+        keys = [k for k in self.panel_cache if k[0] == guild_id]
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM autoreact_whitelist WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM autoreact_panels WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        for key in keys:
+            self.panel_cache.pop(key, None)
+            self.whitelist_cache.pop(key, None)
+        return DataDeleteResult(feature_id="autoreact", deleted=True, rows_affected=rows_affected)
+
+    async def _channel_sendable(self, guild: discord.Guild, channel_id: int) -> bool:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.add_reactions
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="autoreact")
+        for (g_id, panel_id), panel in list(self.panel_cache.items()):
+            if g_id != guild.id or not panel.get("is_active"):
+                continue
+            if await self._channel_sendable(guild, panel["channel_id"]):
+                continue
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "UPDATE autoreact_panels SET is_active = 0 WHERE guild_id = ? AND panel_id = ?",
+                    (g_id, panel_id),
+                )
+                await db.commit()
+            panel["is_active"] = 0
+            result.actions.append(f"deactivated_panel:{panel_id}")
+        return result
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -803,9 +875,13 @@ class AutoReact(commands.Cog):
                 message, em = await self._reaction_queue.get()
                 async with self._reaction_semaphore:
                     try:
-                        await message.add_reaction(em)
-                    except:
-                        pass
+                        cleaned_emoji = emoji.emojize(em, language='alias')
+                        await message.add_reaction(cleaned_emoji)
+                    except Exception as e:
+                        if is_access_error(e) and message.guild:
+                            await report_access_failure(
+                                self.bot, message.guild.id, "autoreact", str(message.channel.id)
+                            )
                 self._reaction_queue.task_done()
                 await asyncio.sleep(0.1)
             except asyncio.CancelledError:

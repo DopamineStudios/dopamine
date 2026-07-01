@@ -9,9 +9,11 @@ import json
 import discord
 from discord import app_commands, Interaction, TextChannel
 from discord.ext import commands, tasks
-from dopamineframework import mod_check
+from beacon import beacon_commands
 
-from config import DDB_PATH, WORDS_PATH
+from config import DDB_PATH
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 class DatabasePool:
@@ -38,14 +40,12 @@ class DatabasePool:
             await conn.close()
 
 
-class DailyWords(commands.Cog):
+class DailyCats(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db_pool = DatabasePool(DDB_PATH)
 
-        self.active_word_channels = set()
         self.active_cat_channels = set()
-        self.word_list = []
         self.next_send_time = None
 
         self.init_data.start()
@@ -56,35 +56,14 @@ class DailyWords(commands.Cog):
 
         asyncio.create_task(self.db_pool.close())
 
-        self.word_list.clear()
-        self.active_word_channels.clear()
         self.active_cat_channels.clear()
-
-        self.word_list = None
-        self.active_word_channels = None
         self.active_cat_channels = None
         self.next_send_time = None
 
     @tasks.loop(count=1)
     async def init_data(self):
-        try:
-            with open(WORDS_PATH, 'r', encoding='utf-8') as f:
-                self.word_list = [line.strip() for line in f if line.strip()]
-
-            if not self.word_list:
-                print(f"Warning: {WORDS_PATH} was loaded but appears to be empty.")
-
-        except FileNotFoundError:
-            print(f"Error: {WORDS_PATH} not found.")
-
-        except Exception as e:
-            print(f"Error reading {WORDS_PATH}: {e}")
-
         await self.db_pool.init()
         conn = self.db_pool.get_connection()
-
-        await conn.execute(
-            "CREATE TABLE IF NOT EXISTS word_channels (channel_id INTEGER PRIMARY KEY)")
 
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS cat_channels (channel_id INTEGER PRIMARY KEY)")
@@ -93,10 +72,6 @@ class DailyWords(commands.Cog):
 
         await conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
         await conn.commit()
-
-        async with conn.execute("SELECT channel_id FROM word_channels") as cursor:
-            async for row in cursor:
-                self.active_word_channels.add(row[0])
 
         async with conn.execute("SELECT channel_id FROM cat_channels") as cursor:
             async for row in cursor:
@@ -152,99 +127,75 @@ class DailyWords(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def daily_task(self):
-        if not self.next_send_time or (not self.word_list and not self.active_cat_channels):
+        if not self.next_send_time or not self.active_cat_channels:
             return
 
         now = datetime.now()
         if now >= self.next_send_time:
-            word = None
-            if self.word_list and self.active_word_channels:
-                word = random.choice(self.word_list)
-
             image_blob = None
-            if self.active_cat_channels:
-                conn = self.db_pool.get_connection()
-                async with conn.execute("SELECT id FROM cat_images") as cursor:
-                    ids = [row[0] for row in await cursor.fetchall()]
+            conn = self.db_pool.get_connection()
+            async with conn.execute("SELECT id FROM cat_images") as cursor:
+                ids = [row[0] for row in await cursor.fetchall()]
 
-                if ids:
-                    random_id = random.choice(ids)
-                    async with conn.execute("SELECT image_data FROM cat_images WHERE id = ?", (random_id,)) as cursor:
-                        row = await cursor.fetchone()
-                        if row:
-                            image_blob = row[0]
-
-            message_word = f"Today's Word: **{word}**" if word else None
+            if ids:
+                random_id = random.choice(ids)
+                async with conn.execute("SELECT image_data FROM cat_images WHERE id = ?", (random_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        image_blob = row[0]
 
             async def send_to_channel(channel_id):
-                channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-                if not channel: return
-
-                if channel_id in self.active_word_channels and message_word:
+                guild_id = None
+                ch = self.bot.get_channel(channel_id)
+                if isinstance(ch, discord.abc.GuildChannel):
+                    guild_id = ch.guild.id
+                elif ch is None:
                     try:
-                        await channel.send(message_word)
+                        ch = await self.bot.fetch_channel(channel_id)
+                        if isinstance(ch, discord.abc.GuildChannel):
+                            guild_id = ch.guild.id
                     except Exception as e:
-                        print(f"Failed to send WORD to {channel_id}: {e}")
+                        if guild_id is None:
+                            for g in self.bot.guilds:
+                                if g.get_channel(channel_id):
+                                    guild_id = g.id
+                                    ch = g.get_channel(channel_id)
+                                    break
+                        if guild_id and is_access_error(e):
+                            await report_access_failure(
+                                self.bot, guild_id, "daily", f"channel:{channel_id}"
+                            )
+                        return
+
+                if not ch or guild_id is None:
+                    return
 
                 if channel_id in self.active_cat_channels and image_blob:
                     try:
                         file = discord.File(io.BytesIO(image_blob), filename="daily_cat.png")
-                        await channel.send(content="Today's Cat Pic:", file=file)
+                        await ch.send(content="Today's Cat Pic:", file=file)
                     except Exception as e:
-                        print(f"Failed to send CAT to {channel_id}: {e}")
+                        if is_access_error(e):
+                            conn = self.db_pool.get_connection()
+                            await conn.execute(
+                                "DELETE FROM cat_channels WHERE channel_id = ?", (channel_id,)
+                            )
+                            await conn.commit()
+                            self.active_cat_channels.discard(channel_id)
+                            await report_access_failure(
+                                self.bot, guild_id, "daily", f"channel:{channel_id}"
+                            )
 
-            all_target_channels = self.active_word_channels.union(self.active_cat_channels)
-
-            await asyncio.gather(*(send_to_channel(cid) for cid in list(all_target_channels)))
+            await asyncio.gather(*(send_to_channel(cid) for cid in list(self.active_cat_channels)))
 
             self.next_send_time = self.next_send_time + timedelta(hours=23)
             await self.save_next_time()
 
     daily = app_commands.Group(name="daily", description="Daily automated messages.")
 
-    words_group = app_commands.Group(name="words", description="Daily word commands", parent=daily)
-
-    cat_group = app_commands.Group(name="cat", description="Daily cat image commands", parent=daily)
-
-    @words_group.command(name="start", description="Start daily word messages in a channel.")
-    @app_commands.check(mod_check)
-    @app_commands.describe(
-        channel="The channel where you want the daily word to be posted (defaults to current channel).")
-    async def daily_words_start(self, interaction: Interaction, channel: discord.TextChannel = None):
-        channel_id = (channel.id if channel else interaction.channel_id)
-        conn = self.db_pool.get_connection()
-
-        if channel_id in self.active_word_channels:
-            return await interaction.response.send_message("Feature is already active here!", ephemeral=True)
-
-        await conn.execute("INSERT INTO word_channels (channel_id) VALUES (?)", (channel_id,))
-        await conn.commit()
-        self.active_word_channels.add(channel_id)
-
-        unix_timestamp = int(self.next_send_time.timestamp())
-
-        await interaction.response.send_message(
-            f"Daily words started! Next word at: <t:{unix_timestamp}:F> (<t:{unix_timestamp}:R>)"
-        )
-
-    @words_group.command(name="stop", description="Stop daily word messages in a channel.")
-    @app_commands.check(mod_check)
-    @app_commands.describe(
-        channel="The channel where you want the daily word to be stopped (defaults to current channel).")
-    async def daily_words_stop(self, interaction: Interaction, channel: discord.TextChannel = None):
-        channel_id = channel.id if channel else interaction.channel_id
-        conn = self.db_pool.get_connection()
-        if channel_id not in self.active_word_channels:
-            return await interaction.response.send_message("Feature isn't active in this channel.", ephemeral=True)
-
-        await conn.execute("DELETE FROM word_channels WHERE channel_id = ?", (channel_id,))
-        await conn.commit()
-        self.active_word_channels.remove(channel_id)
-
-        await interaction.response.send_message(content="Daily words stopped.")
+    cat_group = beacon_commands.Group(name="cat", description="Daily cat image commands", parent=daily, permissions_preset="automation")
 
     @cat_group.command(name="start", description="Start daily cat pics in a channel.")
-    @app_commands.check(mod_check)
     @app_commands.describe(
         channel="The channel where you want the daily cat image to be posted (defaults to current channel).")
     async def daily_cat_start(self, interaction: Interaction, channel: discord.TextChannel = None):
@@ -265,7 +216,6 @@ class DailyWords(commands.Cog):
         )
 
     @cat_group.command(name="stop", description="Stop daily cat pics in a channel.")
-    @app_commands.check(mod_check)
     @app_commands.describe(
         channel="The channel where you want the daily cat image to be stopped (defaults to current channel).")
     async def daily_cat_stop(self, interaction: Interaction, channel: discord.TextChannel = None):
@@ -301,5 +251,81 @@ class DailyWords(commands.Cog):
         except Exception as e:
             await ctx.send(f"An error occurred while wiping the database: {e}")
 
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="daily",
+            name="Daily Cats",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="daily")
+
+    async def _guild_cat_channels(self, guild: discord.Guild) -> list[int]:
+        channels = []
+        for channel_id in list(self.active_cat_channels or []):
+            channel = guild.get_channel(channel_id)
+            if channel is not None and getattr(channel, "guild", None) and channel.guild.id == guild.id:
+                channels.append(channel_id)
+        return channels
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="daily")
+        guild = self.bot.get_guild(guild_id)
+        cat_channels = await self._guild_cat_channels(guild) if guild else []
+        conn = self.db_pool.get_connection()
+        async with conn.execute("SELECT COUNT(*) FROM cat_images") as cursor:
+            image_count = (await cursor.fetchone())[0]
+        chunk.guild_data[guild_id] = {
+            "cat_channels": cat_channels,
+            "cat_images_metadata": {"count": image_count},
+        }
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="daily")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "daily":
+            return DataDeleteResult(feature_id="daily")
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return DataDeleteResult(feature_id="daily")
+        channel_ids = await self._guild_cat_channels(guild)
+        if not channel_ids:
+            return DataDeleteResult(feature_id="daily")
+        conn = self.db_pool.get_connection()
+        placeholders = ",".join("?" * len(channel_ids))
+        cur = await conn.execute(
+            f"DELETE FROM cat_channels WHERE channel_id IN ({placeholders})", channel_ids)
+        await conn.commit()
+        for cid in channel_ids:
+            self.active_cat_channels.discard(cid)
+        return DataDeleteResult(feature_id="daily", deleted=True, rows_affected=cur.rowcount)
+
+    async def _channel_sendable(self, guild: discord.Guild, channel_id: int) -> bool:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.send_messages
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="daily")
+        for channel_id in await self._guild_cat_channels(guild):
+            if not await self._channel_sendable(guild, channel_id):
+                conn = self.db_pool.get_connection()
+                await conn.execute("DELETE FROM cat_channels WHERE channel_id = ?", (channel_id,))
+                await conn.commit()
+                self.active_cat_channels.discard(channel_id)
+                result.actions.append(f"removed_cat_channel:{channel_id}")
+        return result
+
 async def setup(bot):
-    await bot.add_cog(DailyWords(bot))
+    await bot.add_cog(DailyCats(bot))

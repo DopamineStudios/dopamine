@@ -9,8 +9,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import AFKDB_PATH
-from dopamineframework import ViewPaginator, PrivateView
-
+from beacon import ViewPaginator, PrivateView
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 AFK_BUFFER_SECONDS = 30
 AFK_MAX_SECONDS = 72 * 60 * 60
@@ -21,7 +22,6 @@ class AFKState:
     user_id: int
     status: Optional[str]
     is_global: bool
-    role_id: Optional[int]
     save_missed_pings: bool
     started_at: int
     buffer_until: int
@@ -59,7 +59,8 @@ class ViewMissedPings(PrivateView):
         for idx, entry in enumerate(entries, start=1):
             guild = interaction.client.get_guild(entry.guild_id) if entry.guild_id else None
             member = guild.get_member(entry.author_id) if guild else None
-            user = member or interaction.client.get_user(entry.author_id) or await interaction.client.fetch_user(entry.author_id)
+            user = member or interaction.client.get_user(entry.author_id) or await interaction.client.fetch_user(
+                entry.author_id)
             display_name = user.mention or (user.name if user else f"User {entry.author_id}")
             msg_link = ""
             if entry.guild_id and entry.channel_id and entry.message_id:
@@ -85,13 +86,15 @@ class ViewMissedPings(PrivateView):
             link = message.jump_url
             sent = True
         except discord.Forbidden:
-            await interaction.response.send_message("""I can't DM you the Missed Pings! Please first DM me "hi" so that Discord lets me DM you.""", ephemeral=True)
+            await interaction.response.send_message(
+                """I can't DM you the Missed Pings! Please first DM me "hi" so that Discord lets me DM you.""",
+                ephemeral=True)
             sent = False
 
         if sent:
-            await interaction.response.send_message(f"I sent the Missed Pings to your DMs! [Click here to Jump]({link}).", ephemeral=True)
+            await interaction.response.send_message(
+                f"I sent the Missed Pings to your DMs! [Click here to Jump]({link}).", ephemeral=True)
             await self.cog.clear_missed_pings(self.user_id)
-
 
 
 class AFK(commands.Cog):
@@ -100,7 +103,6 @@ class AFK(commands.Cog):
         self.db_pool: Optional[asyncio.Queue[aiosqlite.Connection]] = None
         self.afk_users: Dict[int, AFKState] = {}
         self.missed_pings_cache: Dict[int, List[MissedPing]] = {}
-        self.afk_by_role: Dict[int, Set[int]] = {}
 
     async def cog_load(self):
         await self.init_pools()
@@ -193,17 +195,16 @@ class AFK(commands.Cog):
     async def populate_caches(self):
         self.afk_users.clear()
         self.missed_pings_cache.clear()
-        self.afk_by_role.clear()
 
         now = int(discord.utils.utcnow().timestamp())
 
         async with self.acquire_db() as db:
             async with db.execute(
-                """
-                SELECT user_id, status, is_global, role_id, save_missed_pings,
-                       started_at, buffer_until, origin_guild_id, old_nick
-                FROM afk_users
-                """
+                    """
+                    SELECT user_id, status, is_global, save_missed_pings,
+                           started_at, buffer_until, origin_guild_id, old_nick
+                    FROM afk_users
+                    """
             ) as cursor:
                 rows = await cursor.fetchall()
                 for row in rows:
@@ -211,7 +212,6 @@ class AFK(commands.Cog):
                         user_id,
                         status,
                         is_global,
-                        role_id,
                         save_missed_pings,
                         started_at,
                         buffer_until,
@@ -227,7 +227,6 @@ class AFK(commands.Cog):
                         user_id=user_id,
                         status=status,
                         is_global=bool(is_global),
-                        role_id=role_id,
                         save_missed_pings=bool(save_missed_pings),
                         started_at=started_at,
                         buffer_until=buffer_until,
@@ -235,16 +234,14 @@ class AFK(commands.Cog):
                         old_nick=old_nick,
                     )
                     self.afk_users[user_id] = state
-                    if role_id:
-                        self.afk_by_role.setdefault(role_id, set()).add(user_id)
 
             async with db.execute(
-                """
-                SELECT id, user_id, author_id, guild_id, channel_id,
-                       message_id, content, timestamp
-                FROM missed_pings
-                ORDER BY timestamp ASC
-                """
+                    """
+                    SELECT id, user_id, author_id, guild_id, channel_id,
+                           message_id, content, timestamp
+                    FROM missed_pings
+                    ORDER BY timestamp ASC
+                    """
             ) as cursor:
                 rows = await cursor.fetchall()
                 for row in rows:
@@ -271,20 +268,15 @@ class AFK(commands.Cog):
                     self.missed_pings_cache.setdefault(user_id, []).append(entry)
 
     async def set_afk(
-        self,
-        *,
-        user: discord.Member,
-        status: Optional[str],
-        is_global: bool,
-        role: Optional[discord.Role],
-        save_missed_pings: bool,
+            self,
+            *,
+            user: discord.Member,
+            status: Optional[str],
+            is_global: bool,
+            save_missed_pings: bool,
     ):
         now = int(discord.utils.utcnow().timestamp())
         buffer_until = now + AFK_BUFFER_SECONDS
-        role_id = role.id if role else None
-
-        if role_id and not save_missed_pings:
-            save_missed_pings = True
 
         old_nick = user.nick
         origin_guild_id = user.guild.id if isinstance(user.guild, discord.Guild) else None
@@ -300,7 +292,6 @@ class AFK(commands.Cog):
             user_id=user.id,
             status=status,
             is_global=is_global,
-            role_id=role_id,
             save_missed_pings=save_missed_pings,
             started_at=now,
             buffer_until=buffer_until,
@@ -310,22 +301,18 @@ class AFK(commands.Cog):
 
         self.afk_users[user.id] = state
 
-        if role_id:
-            self.afk_by_role.setdefault(role_id, set()).add(user.id)
-
         async with self.acquire_db() as db:
             await db.execute(
                 """
                 INSERT INTO afk_users (
-                    user_id, status, is_global, role_id,
+                    user_id, status, is_global,
                     save_missed_pings, started_at, buffer_until,
                     origin_guild_id, old_nick
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     status = excluded.status,
                     is_global = excluded.is_global,
-                    role_id = excluded.role_id,
                     save_missed_pings = excluded.save_missed_pings,
                     started_at = excluded.started_at,
                     buffer_until = excluded.buffer_until,
@@ -336,7 +323,6 @@ class AFK(commands.Cog):
                     user.id,
                     status,
                     int(is_global),
-                    role_id,
                     int(save_missed_pings),
                     now,
                     buffer_until,
@@ -348,12 +334,6 @@ class AFK(commands.Cog):
 
     async def clear_afk(self, user_id: int, revert_nick: bool = True):
         state = self.afk_users.pop(user_id, None)
-        if state and state.role_id:
-            role_set = self.afk_by_role.get(state.role_id)
-            if role_set:
-                role_set.discard(user_id)
-                if not role_set:
-                    self.afk_by_role.pop(state.role_id, None)
 
         if revert_nick and state and state.origin_guild_id:
             guild = self.bot.get_guild(state.origin_guild_id)
@@ -443,7 +423,6 @@ class AFK(commands.Cog):
             user=ctx.author,
             status=status,
             is_global=True,
-            role=None,
             save_missed_pings=True,
         )
         reply = f"{ctx.author.mention} you're now AFK: {status}" if status else f"{ctx.author.mention} you're now AFK!"
@@ -453,16 +432,14 @@ class AFK(commands.Cog):
     @app_commands.describe(
         status="Optional AFK status message.",
         global_mentions="Whether mentions in all servers should trigger AFK responses instead of only the current server.",
-        role="Optional role to listen for mentions as missed pings.",
         save_missed_pings="Whether to save messages where you are mentioned and show them when you're back.",
     )
     async def slash_afk(
-        self,
-        interaction: discord.Interaction,
-        status: Optional[str] = None,
-        global_mentions: Optional[bool] = True,
-        role: Optional[discord.Role] = None,
-        save_missed_pings: Optional[bool] = True,
+            self,
+            interaction: discord.Interaction,
+            status: Optional[str] = None,
+            global_mentions: Optional[bool] = True,
+            save_missed_pings: Optional[bool] = True,
     ):
         if not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("AFK can only be used in servers.", ephemeral=True)
@@ -474,14 +451,10 @@ class AFK(commands.Cog):
         is_global = bool(global_mentions) if global_mentions is not None else True
         save_mp = bool(save_missed_pings) if save_missed_pings is not None else True
 
-        if role is not None and not save_mp:
-            save_mp = True
-
         await self.set_afk(
             user=interaction.user,
             status=status,
             is_global=is_global,
-            role=role,
             save_missed_pings=save_mp,
         )
 
@@ -552,22 +525,15 @@ class AFK(commands.Cog):
 
         if message.role_mentions:
             for role in message.role_mentions:
-                user_ids = self.afk_by_role.get(role.id)
-                if not user_ids:
-                    continue
-
-                for uid in list(user_ids):
-                    state = self.afk_users.get(uid)
-                    if not state:
-                        continue
-
+                for uid, state in list(self.afk_users.items()):
                     if await self._maybe_cleanup_if_expired(uid, state):
                         continue
 
                     if not self._is_afk_active_in_context(state, message.guild):
                         continue
 
-                    if not state.save_missed_pings:
+                    member = message.guild.get_member(uid)
+                    if not member or role not in member.roles:
                         continue
 
                     await self._store_missed_ping(
@@ -580,16 +546,39 @@ class AFK(commands.Cog):
                         timestamp=int(message.created_at.timestamp()),
                     )
 
+                    if len(role.members) <= 3:
+                        notice = self._format_afk_notice(member, state)
+                        try:
+                            await message.channel.send(notice)
+                        except (discord.Forbidden, discord.HTTPException):
+                            pass
+
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        message_id = payload.message_id
+
+        for user_id, entries in self.missed_pings_cache.items():
+            for entry in entries:
+                if entry.message_id == message_id:
+                    entry.content = "*[This message was deleted]*"
+
+        async with self.acquire_db() as db:
+            await db.execute(
+                "UPDATE missed_pings SET content = ? WHERE message_id = ?",
+                ("[This message was deleted]", message_id),
+            )
+            await db.commit()
+
     async def _store_missed_ping(
-        self,
-        *,
-        user_id: int,
-        author_id: int,
-        guild_id: Optional[int],
-        channel_id: Optional[int],
-        message_id: Optional[int],
-        content: str,
-        timestamp: int,
+            self,
+            *,
+            user_id: int,
+            author_id: int,
+            guild_id: Optional[int],
+            channel_id: Optional[int],
+            message_id: Optional[int],
+            content: str,
+            timestamp: int,
     ):
         async with self.acquire_db() as db:
             cursor = await db.execute(
@@ -625,7 +614,60 @@ class AFK(commands.Cog):
         )
         self.missed_pings_cache.setdefault(user_id, []).append(entry)
 
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="afk",
+            name="AFK",
+            user_export=True,
+            user_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="afk")
+        async with self.acquire_db() as db:
+            afk_rows = await export_table(
+                db,
+                """SELECT user_id, status, is_global, save_missed_pings, started_at,
+                          buffer_until, origin_guild_id, old_nick
+                   FROM afk_users WHERE user_id = ?""",
+                (user_id,),
+            )
+            missed_rows = await export_table(
+                db,
+                """SELECT id, user_id, author_id, guild_id, channel_id,
+                          message_id, content, timestamp
+                   FROM missed_pings WHERE user_id = ? ORDER BY timestamp ASC""",
+                (user_id,),
+            )
+        if afk_rows:
+            chunk.global_data["afk_state"] = afk_rows[0]
+        if missed_rows:
+            chunk.global_data["missed_pings"] = missed_rows
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        return DataExportChunk(feature_id="afk")
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "afk":
+            return DataDeleteResult(feature_id="afk")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        self.afk_users.pop(user_id, None)
+        self.missed_pings_cache.pop(user_id, None)
+        return DataDeleteResult(feature_id="afk", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="afk")
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="afk")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AFK(bot))
-

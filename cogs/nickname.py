@@ -7,8 +7,10 @@ from discord.ext import commands, tasks
 from typing import Dict, List, Optional, Set, Tuple
 import re
 from config import NFDB_PATH, DB_PATH
-from dopamineframework import mod_check
+from beacon import beacon_commands
 from contextlib import asynccontextmanager
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 from utils.log import LoggingManager
 
 LEET_MAP = str.maketrans({
@@ -254,16 +256,25 @@ class Nickname(commands.Cog):
                     temp_cache[guild_id].add(user_id)
         self.verifiedcache = temp_cache
 
-    def isbadname(self, name: str, guild: discord.Guild, member_id: int) -> bool:
+    async def isbadname(self, name: str, guild: discord.Guild, member_id: int) -> bool:
         settings = self.serversettingscache.get(guild.id)
         if not settings:
             return False
+
         verified = self.verifiedcache.get(guild.id, set())
         if member_id in verified:
             return False
-        member = guild.get_member(member_id) or guild.fetch_member(member_id)
+
+        member = guild.get_member(member_id)
+        if not member:
+            try:
+                member = await guild.fetch_member(member_id)
+            except discord.NotFound:
+                return False
+
         if not member:
             return False
+
         if member.top_role >= guild.me.top_role or member == guild.owner:
             return False
 
@@ -425,7 +436,7 @@ class Nickname(commands.Cog):
 
         guild = after.guild
         user_id = after.id
-        trigger_reason = self.isbadname(after.display_name, guild, user_id)
+        trigger_reason = await self.isbadname(after.display_name, guild, user_id)
         if trigger_reason:
             settings = self.serversettingscache.get(after.guild.id, {})
             placeholder = settings.get("placeholder", "Change your nickname")
@@ -433,7 +444,7 @@ class Nickname(commands.Cog):
             try:
                 old_name = after.display_name
                 reason = trigger_reason
-                await after.edit(nick=placeholder, reason=f"Dopamine: {trigger_reason}")
+                await after.edit(nick=placeholder, reason=f"Dopamine Nickname Moderator Feature - Automatic Trigger upon Member Join: {trigger_reason}")
 
                 await self.log_nickname_reset(after, old_name, reason)
             except (discord.Forbidden, discord.HTTPException):
@@ -448,7 +459,7 @@ class Nickname(commands.Cog):
         guild_id = member.guild.id
         user_id = member.id
 
-        trigger_reason = self.isbadname(member.display_name, guild, user_id)
+        trigger_reason = await self.isbadname(member.display_name, guild, user_id)
 
         if trigger_reason:
             settings = self.serversettingscache.get(guild_id, {})
@@ -457,7 +468,7 @@ class Nickname(commands.Cog):
             try:
                 old_name = member.display_name
                 reason = trigger_reason
-                await member.edit(nick=placeholder, reason=f"Dopamine: {trigger_reason}")
+                await member.edit(nick=placeholder, reason=f"Dopamine's Nickname Moderator Feature - Automatic Trigger upon Member Join: {trigger_reason}")
 
                 await self.log_nickname_reset(member, old_name, reason)
             except (discord.Forbidden, discord.HTTPException):
@@ -465,10 +476,9 @@ class Nickname(commands.Cog):
 
     nickname_group = app_commands.Group(name="nickname", description="Nickname commands")
 
-    moderator_group = app_commands.Group(name="moderator", description="Nickname Moderator commands group", parent=nickname_group)
+    moderator_group = beacon_commands.Group(name="moderator", description="Nickname Moderator commands group", parent=nickname_group, permissions_preset="moderator")
 
     @moderator_group.command(name="verify", description="Verify a user's nickname to make them immune to the moderation.")
-    @app_commands.check(mod_check)
     async def verify_user(self, interaction: discord.Interaction, member: discord.Member):
         guild_id = interaction.guild.id
         user_id = member.id
@@ -505,9 +515,6 @@ class Nickname(commands.Cog):
         await interaction.response.send_message(embed=status_embed, ephemeral=True)
 
     @moderator_group.command(name="panel", description="Open the Nickname Moderator settings and info panel.")
-    @app_commands.check(mod_check)
-
-
     async def nickname_panel(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id
 
@@ -548,7 +555,6 @@ class Nickname(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view)
 
     @moderator_group.command(name="verified", description="List all verified members.")
-    @app_commands.check(mod_check)
     async def list_verified(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id
         verified_ids = list(self.verifiedcache.get(guild_id, set()))
@@ -598,7 +604,6 @@ class Nickname(commands.Cog):
         await ctx.send(embed=discord.Embed(title="Updated Database Successfully", description=f"Successfully added `{len(new_words)}` to the profanity database."))
 
     @moderator_group.command(name="scan", description="Scan all members and reset names. (3-day cooldown)")
-    @app_commands.check(mod_check)
     async def force_scan(self, interaction: discord.Interaction):
         guild_id = interaction.guild_id
         now = int(discord.utils.utcnow().timestamp())
@@ -636,11 +641,11 @@ class Nickname(commands.Cog):
         async for member in interaction.guild.fetch_members(limit=None):
             if member.bot: continue
 
-            reason = self.isbadname(member.display_name, guild, member.id)
+            reason = await self.isbadname(member.display_name, guild, member.id)
             if reason:
                 try:
                     old_name = member.display_name
-                    await member.edit(nick=placeholder, reason=f"Dopamine Scan: {reason}")
+                    await member.edit(nick=placeholder, reason=f"Dopamine's Nickname Moderator Feature - Manual Scan triggered by {interaction.user.display_name}: {reason}")
                     await self.log_nickname_reset(member, old_name, f"Force Scan: {reason}")
                     count += 1
                     await asyncio.sleep(0.2)
@@ -648,6 +653,94 @@ class Nickname(commands.Cog):
                     continue
 
         await interaction.followup.send(embed=discord.Embed(title="Scan Complete", description=f"**{count}** nicknames have been moderated.", colour=discord.Colour.green()), ephemeral=True)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="nickname",
+            name="Nickname",
+            user_export=True,
+            user_delete=True,
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="nickname")
+        async with self.acquire_db() as db:
+            if guild_ids is None:
+                rows = await export_table(
+                    db, "SELECT guild_id, user_id FROM verified WHERE user_id = ?", (user_id,))
+            else:
+                placeholders = ",".join("?" * len(guild_ids))
+                rows = await export_table(
+                    db,
+                    f"SELECT guild_id, user_id FROM verified WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    (user_id, *guild_ids),
+                )
+        for row in rows:
+            gid = row.pop("guild_id")
+            chunk.guild_data.setdefault(gid, {}).setdefault("verified", []).append(row)
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="nickname")
+        async with self.acquire_db() as db:
+            settings = await export_table(
+                db,
+                "SELECT guild_id, symbol_filter, profanity_filter, placeholder, last_scan FROM serversettings WHERE guild_id = ?",
+                (guild_id,),
+            )
+            verified = await export_table(
+                db, "SELECT guild_id, user_id FROM verified WHERE guild_id = ?", (guild_id,))
+            profanity = await export_table(db, "SELECT word FROM profanity")
+        chunk.guild_data[guild_id] = {
+            "settings": settings,
+            "verified": verified,
+            "profanity": profanity,
+        }
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "nickname":
+            return DataDeleteResult(feature_id="nickname")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            if guild_ids is None:
+                cur = await db.execute("DELETE FROM verified WHERE user_id = ?", (user_id,))
+            else:
+                placeholders = ",".join("?" * len(guild_ids))
+                cur = await db.execute(
+                    f"DELETE FROM verified WHERE user_id = ? AND guild_id IN ({placeholders})",
+                    (user_id, *guild_ids),
+                )
+            rows_affected = cur.rowcount
+            await db.commit()
+        if guild_ids is None:
+            for gid in list(self.verifiedcache):
+                self.verifiedcache[gid].discard(user_id)
+        else:
+            for gid in guild_ids:
+                if gid in self.verifiedcache:
+                    self.verifiedcache[gid].discard(user_id)
+        return DataDeleteResult(feature_id="nickname", deleted=True, rows_affected=rows_affected)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "nickname":
+            return DataDeleteResult(feature_id="nickname")
+        rows_affected = 0
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM verified WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM serversettings WHERE guild_id = ?", (guild_id,))
+            rows_affected += cur.rowcount
+            await db.commit()
+        self.verifiedcache.pop(guild_id, None)
+        self.serversettingscache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="nickname", deleted=True, rows_affected=rows_affected)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="nickname")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Nickname(bot))

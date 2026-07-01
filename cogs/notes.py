@@ -7,10 +7,105 @@ import asyncio
 from typing import Optional, Dict, List, Any
 from contextlib import asynccontextmanager
 from config import NOTEDB_PATH
-from dopamineframework import ViewPaginator
+from beacon import ViewPaginator, preconditions, PrivateView
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 note_group = app_commands.Group(name="note", description="Note management commands")
 
+
+class UndoButtonView(PrivateView):
+    def __init__(self, user, cog: Notes, user_id: int, action_type: str, data: dict, interaction: discord.Interaction):
+        super().__init__(user, timeout=30.0)
+        self.cog = cog
+        self.user_id = user_id
+        self.action_type = action_type
+        self.data = data
+        self.interaction = interaction
+
+    async def on_timeout(self):
+        try:
+            await self.interaction.edit_original_response(view=None)
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Undo", style=discord.ButtonStyle.danger, custom_id="undo_action")
+    async def undo_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+
+        try:
+            async with self.cog.acquire_db() as db:
+                if self.action_type == "create":
+                    note_name = self.data["name"]
+                    await db.execute(
+                        "DELETE FROM user_notes WHERE user_id = ? AND note_name = ?",
+                        (self.user_id, note_name)
+                    )
+                    await db.commit()
+
+                    if self.user_id in self.cog.notes_cache:
+                        self.cog.notes_cache[self.user_id].pop(note_name, None)
+
+                    message = f"Action undone! Note '{note_name}' has been deleted."
+
+                elif self.action_type == "edit":
+                    old_name = self.data["old_name"]
+                    new_name = self.data["new_name"]
+                    old_content = self.data["old_content"]
+
+                    if old_name != new_name:
+                        await db.execute(
+                            "DELETE FROM user_notes WHERE user_id = ? AND note_name = ?",
+                            (self.user_id, new_name)
+                        )
+
+                    await db.execute(
+                        """
+                        INSERT INTO user_notes (user_id, note_name, note_content, updated_at)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(user_id, note_name) DO UPDATE SET
+                            note_content = excluded.note_content,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (self.user_id, old_name, old_content)
+                    )
+                    await db.commit()
+
+                    if self.user_id in self.cog.notes_cache:
+                        if old_name != new_name:
+                            self.cog.notes_cache[self.user_id].pop(new_name, None)
+                        self.cog.notes_cache[self.user_id][old_name] = old_content
+
+                    message = f"Action undone! Note has been reverted back to '{old_name}'."
+
+                elif self.action_type == "delete":
+                    note_name = self.data["name"]
+                    content = self.data["content"]
+
+                    await db.execute(
+                        """
+                        INSERT INTO user_notes (user_id, note_name, note_content)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(user_id, note_name) DO UPDATE SET
+                            note_content = excluded.note_content
+                        """,
+                        (self.user_id, note_name, content)
+                    )
+                    await db.commit()
+
+                    if self.user_id not in self.cog.notes_cache:
+                        self.cog.notes_cache[self.user_id] = {}
+                    self.cog.notes_cache[self.user_id][note_name] = content
+
+                    message = f"Action undone! Note '{note_name}' has been restored."
+
+            await self.interaction.edit_original_response(content=message, embed=None, view=None)
+            self.stop()
+
+        except Exception as e:
+            await interaction.followup.send(f"Error executing undo: {e}", ephemeral=True)
 
 class Notes(commands.Cog):
     def __init__(self, bot):
@@ -155,11 +250,21 @@ class Notes(commands.Cog):
                 self.cog.notes_cache[user_id][new_name] = new_content
 
                 embed = discord.Embed(
-                    title="Note Updated Successfully",
-                    description=f"**New Note Title:** {new_name}\n\n**New Note Content:** {new_content}",
-                    color=discord.Color(0x944ae8)
+                    title=f"{new_name}",
+                    description=f"{new_content}",
+                    color=discord.Colour.green()
                 )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                embed.set_footer(text=f"To see it, use /note get {new_name}.")
+                embed.set_author(name="Note Updated Successfully")
+                undo_view = UndoButtonView(
+                    user=interaction.user,
+                    cog=self.cog,
+                    user_id=user_id,
+                    action_type="edit",
+                    data={"old_name": self.old_name, "new_name": new_name, "old_content": self.old_content},
+                    interaction=interaction
+                )
+                await interaction.response.send_message(embed=embed, view=undo_view, Ephemeral=True)
 
             except Exception as e:
                 await interaction.response.send_message(f"Error updating note: {e}", ephemeral=True)
@@ -212,8 +317,17 @@ class Notes(commands.Cog):
                     description=content,
                     color=discord.Color.green()
                 )
-                embed.set_footer(text="Note has been saved successfully! To retrieve it, use /note fetch <name>.")
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                embed.set_footer(text=f"To see it, use /note get {name}.")
+                embed.set_author(name="Note Created Successfully")
+                undo_view = UndoButtonView(
+                    user=interaction.user,
+                    cog=self.cog,
+                    user_id=user_id,
+                    action_type="create",
+                    data={"name": name},
+                    interaction=interaction
+                )
+                await interaction.response.send_message(embed=embed, view=undo_view, ephemeral=True)
 
             except Exception as e:
                 embed = discord.Embed(
@@ -222,6 +336,44 @@ class Notes(commands.Cog):
                     color=discord.Color.red()
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="notes",
+            name="Notes",
+            user_export=True,
+            user_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="notes")
+        async with self.acquire_db() as db:
+            rows = await export_table(
+                db,
+                "SELECT note_name, note_content, created_at, updated_at FROM user_notes WHERE user_id = ?",
+                (user_id,),
+            )
+        if rows:
+            chunk.global_data["notes"] = rows
+        return chunk
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        return DataExportChunk(feature_id="notes")
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "notes":
+            return DataDeleteResult(feature_id="notes")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM user_notes WHERE user_id = ?", (user_id,))
+            await db.commit()
+        self.notes_cache.pop(user_id, None)
+        return DataDeleteResult(feature_id="notes", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="notes")
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="notes")
 
 async def _get_notes_cog(interaction: discord.Interaction) -> Optional[Notes]:
     return interaction.client.get_cog('Notes')
@@ -242,6 +394,7 @@ async def _get_names_autocomplete(interaction: discord.Interaction, current: str
 
 @note_group.command(name="create", description="Open the UI to create a note")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@preconditions.global_cooldown()
 async def note_create(interaction: discord.Interaction):
     cog = await _get_notes_cog(interaction)
     if not cog:
@@ -260,6 +413,7 @@ async def note_create(interaction: discord.Interaction):
 @note_group.command(name="edit", description="Edit an existing note")
 @app_commands.autocomplete(name=_get_names_autocomplete)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@preconditions.global_cooldown()
 async def note_edit(interaction: discord.Interaction, name: str):
     cog = await _get_notes_cog(interaction)
     if not cog:
@@ -280,6 +434,7 @@ async def note_edit(interaction: discord.Interaction, name: str):
 @note_group.command(name="get", description="Retrieve a note by name")
 @app_commands.autocomplete(name=_get_names_autocomplete)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@preconditions.global_cooldown()
 async def note_fetch(interaction: discord.Interaction, name: str):
     cog = await _get_notes_cog(interaction)
     if not cog:
@@ -304,6 +459,7 @@ async def note_fetch(interaction: discord.Interaction, name: str):
 
 @note_group.command(name="list", description="List all of your saved notes")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@preconditions.global_cooldown()
 async def note_list(interaction: discord.Interaction):
     cog = await _get_notes_cog(interaction)
     if not cog:
@@ -341,6 +497,7 @@ async def note_list(interaction: discord.Interaction):
 @note_group.command(name="delete", description="Delete a note by name")
 @app_commands.autocomplete(name=_get_names_autocomplete)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@preconditions.global_cooldown()
 async def note_delete(interaction: discord.Interaction, name: str):
     cog = await _get_notes_cog(interaction)
     if not cog:
@@ -351,6 +508,8 @@ async def note_delete(interaction: discord.Interaction, name: str):
 
     if name in user_notes:
         try:
+            deleted_content = user_notes[name]
+
             async with cog.acquire_db() as db:
                 await db.execute(
                     "DELETE FROM user_notes WHERE user_id = ? AND note_name = ?",
@@ -365,7 +524,18 @@ async def note_delete(interaction: discord.Interaction, name: str):
                 description=f"Note '{name}' has been deleted.",
                 color=discord.Color.green()
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+            undo_view = UndoButtonView(
+                user=interaction.user,
+                cog=cog,
+                user_id=user_id,
+                action_type="delete",
+                data={"name": name, "content": deleted_content},
+                interaction=interaction
+            )
+
+            await interaction.response.send_message(embed=embed, view=undo_view, ephemeral=True)
+
         except Exception as e:
             await interaction.response.send_message(f"Error deleting note: {e}", ephemeral=True)
     else:

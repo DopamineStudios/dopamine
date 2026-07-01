@@ -7,10 +7,13 @@ import json
 from typing import Optional, Dict, List, Any
 import time
 from contextlib import asynccontextmanager
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView
 from config import STICKYDB_PATH
-from dopamineframework import mod_check
+from beacon import beacon_commands
 from cogs.embed import UseEmbedPage
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 
 
 
@@ -122,11 +125,13 @@ class EditPage(PrivateLayoutView):
 
         bots_enabled = p.get('include_bots', 1) == 1
         is_embed_response = p.get("response_type") == "embed"
+        conv_mode = p.get('conv_mode', 'Dynamic')
         response_label = "Embed" if is_embed_response else "Text"
         response_preview = (p.get("embed_content") if is_embed_response else p.get("response_text")) or "*None*"
         details = (
             f"**Channel:** <#{p['channel_id']}>\n"
             f"**Response Type:** `{response_label}`\n"
+            f"**Conversation Mode:** `{conv_mode}`\n"
             f"**Conversation Duration:** `{p.get('conversation_duration', 10)}s`\n"
             f"**Include Bots:** `{'Yes' if bots_enabled else 'No'}`\n"
             f"**Response Content:** ```{response_preview}```"
@@ -149,16 +154,23 @@ class EditPage(PrivateLayoutView):
         btn_delete.callback = self.delete_callback
         btn_duration = discord.ui.Button(label="Edit Conversation Duration", style=discord.ButtonStyle.secondary)
         btn_duration.callback = self.edit_duration_callback
+        btn_conv_mode = discord.ui.Button(label=f" Conversation Detection Mode: {conv_mode}", style=discord.ButtonStyle.secondary)
+        btn_conv_mode.callback = self.toggle_conv_mode_callback
         btn_bots = discord.ui.Button(label=f"{'Disable' if bots_enabled else 'Enable'} Include Bots",
                                      style=discord.ButtonStyle.secondary if bots_enabled else discord.ButtonStyle.primary)
         btn_bots.callback = self.toggle_bots_callback
 
         row1.add_item(btn_edit_message)
         row1.add_item(btn_edit_channel)
-        row1.add_item(btn_duration)
-        row1.add_item(btn_bots)
         row1.add_item(btn_delete)
+        row1.add_item(btn_bots)
         container.add_item(row1)
+
+        row = discord.ui.ActionRow()
+
+        row.add_item(btn_duration)
+        row.add_item(btn_conv_mode)
+        container.add_item(row)
 
         back_row = discord.ui.ActionRow()
         btn_back = discord.ui.Button(label="Return to Manage Menu", style=discord.ButtonStyle.secondary)
@@ -263,6 +275,23 @@ class EditPage(PrivateLayoutView):
 
         panel['include_bots'] = new_val
         self.panel_data['include_bots'] = new_val
+
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def toggle_conv_mode_callback(self, interaction: discord.Interaction):
+        title = self.panel_data['title']
+        panel = self.cog.panel_cache[self.guild_id][title]
+
+        new_mode = "One Shot" if panel.get('conv_mode', 'Dynamic') == "Dynamic" else "Dynamic"
+
+        async with self.cog.acquire_db() as db:
+            await db.execute("UPDATE sticky_panels SET conv_mode = ? WHERE guild_id = ? AND title = ?",
+                             (new_mode, self.guild_id, title))
+            await db.commit()
+
+        panel['conv_mode'] = new_mode
+        self.panel_data['conv_mode'] = new_mode
 
         self.build_layout()
         await interaction.response.edit_message(view=self)
@@ -556,6 +585,9 @@ class StickyDashboard(PrivateLayoutView):
                 "* **Conversation Detection:** Dopamine automatically detects a conversation if 2 messages are sent within 5 seconds, and pauses sending the sticky message to avoid spam. The duration that Dopamine will wait after the last message can be customized."))
 
         container.add_item(discord.ui.TextDisplay(
+                "* **Conversation Detection Mode:** Choose between **One Shot** (conversation duration isn't extended when a third message is sent after conversation is detected) or **Dynamic** (conversation duration is extended when any new messages are sent while a conversation is happening)."))
+
+        container.add_item(discord.ui.TextDisplay(
                 "* **Bot Detection:** Choose whether Dopamine should re-send the sticky message if a bot sends a message or ignore bots."))
 
         container.add_item(discord.ui.TextDisplay("To customize the above and more for a Sticky Message or to create a new Sticky Message, use the buttons below."))
@@ -709,6 +741,7 @@ class StickyTextSetupModal(discord.ui.Modal):
             "response_text": response_text,
             "embed_content": None,
             "embed_data": None,
+            "conv_mode": "Dynamic"
         }
 
         async with self.cog.acquire_db() as db:
@@ -761,6 +794,7 @@ class StickyEmbedNameModal(discord.ui.Modal):
             "response_text": None,
             "embed_content": self.embed_content,
             "embed_data": json.dumps(self.embed_data, ensure_ascii=False),
+            "conv_mode": "Dynamic"
         }
 
         async with self.cog.acquire_db() as db:
@@ -936,6 +970,7 @@ class StickyMessages(commands.Cog):
                 "ALTER TABLE sticky_panels ADD COLUMN response_text TEXT",
                 "ALTER TABLE sticky_panels ADD COLUMN embed_content TEXT",
                 "ALTER TABLE sticky_panels ADD COLUMN embed_data TEXT",
+                "ALTER TABLE sticky_panels ADD COLUMN conv_mode TEXT DEFAULT 'Dynamic'",
             ):
                 try:
                     await db.execute(sql)
@@ -987,7 +1022,8 @@ class StickyMessages(commands.Cog):
         except asyncio.CancelledError:
             pass
         finally:
-            self.sticky_tasks.pop(channel.id, None)
+            if self.sticky_tasks.get(channel.id) == asyncio.current_task():
+                self.sticky_tasks.pop(channel.id, None)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -1005,10 +1041,18 @@ class StickyMessages(commands.Cog):
         last_time = self.last_message_time.get(message.channel.id, 0)
         self.last_message_time[message.channel.id] = current_time
 
+        conv_mode = panel.get('conv_mode', 'Dynamic')
+
+        if conv_mode == 'One Shot' and message.channel.id in self.sticky_tasks:
+            return
+
         if message.channel.id in self.sticky_tasks:
             self.sticky_tasks[message.channel.id].cancel()
 
-        if (current_time - last_time) < 5.0:
+        if (current_time - last_time) < round(panel.get('conversation_duration', 10) / 2):
+            if conv_mode == 'One Shot' and message.channel.id in self.sticky_tasks:
+                return
+
             delay = panel.get('conversation_duration', 10)
             self.sticky_tasks[message.channel.id] = asyncio.create_task(
                 self.sticky_worker(message.channel, panel, delay)
@@ -1038,20 +1082,87 @@ class StickyMessages(commands.Cog):
                 await db.commit()
             panel['last_message_id'] = new_msg.id
         except Exception as e:
-            print(f"Sticky Error: {e}")
+            if is_access_error(e):
+                await report_access_failure(
+                    self.bot, panel['guild_id'], "sticky_messages", panel.get('title', '')
+                )
 
     @tasks.loop(seconds=120)
     async def sticky_monitor(self):
         for c_id, panel in list(self.active_channels.items()):
-            if c_id in self.sticky_tasks: continue
-            channel = self.bot.get_channel(c_id) or await self.bot.fetch_channel(c_id)
+            if c_id in self.sticky_tasks:
+                continue
+            try:
+                channel = self.bot.get_channel(c_id) or await self.bot.fetch_channel(c_id)
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(
+                        self.bot, panel['guild_id'], "sticky_messages", panel.get('title', '')
+                    )
+                continue
             if channel and channel.last_message_id != panel.get('last_message_id'):
                 await self.update_sticky_message(panel, channel)
 
-    sticky_group = app_commands.Group(name="sticky", description="Sticky message commands")
+    sticky_group = beacon_commands.Group(name="sticky", description="Sticky message commands", permissions_preset="automation")
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="sticky_messages",
+            name="Sticky Messages",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="sticky_messages")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="sticky_messages")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM sticky_panels WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"sticky_panels": rows}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="sticky_messages")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "sticky_messages":
+            return DataDeleteResult(feature_id="sticky_messages")
+        panels = list(self.panel_cache.get(guild_id, {}).keys())
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM sticky_panels WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        for title in panels:
+            panel = self.panel_cache.get(guild_id, {}).pop(title, None)
+            if panel:
+                self.active_channels.pop(panel.get("channel_id"), None)
+        return DataDeleteResult(feature_id="sticky_messages", deleted=True, rows_affected=cur.rowcount)
+
+    async def _channel_sendable(self, guild: discord.Guild, channel_id: int) -> bool:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.send_messages
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="sticky_messages")
+        for title in list(self.panel_cache.get(guild.id, {}).keys()):
+            panel = self.panel_cache[guild.id][title]
+            channel_id = panel.get("channel_id")
+            if not channel_id or await self._channel_sendable(guild, channel_id):
+                continue
+            await self.delete_panel(guild.id, title)
+            result.actions.append(f"removed_panel:{title}")
+        return result
 
     @sticky_group.command(name="message", description="Open the Sticky Message Dashboard")
-    @app_commands.check(mod_check)
     async def sticky_dashboard(self, interaction: discord.Interaction):
         await interaction.response.send_message(view=StickyDashboard(interaction.user, self, interaction.guild.id))
 

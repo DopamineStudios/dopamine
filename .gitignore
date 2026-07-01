@@ -211,6 +211,7 @@ __marimo__/
 
 # Database files
 databases/
+backup/
 *.db
 *.sqlite
 
@@ -226,3 +227,4 @@ __pycache__/
 *.4
 *.5
 /core/sync_state.json
+/cogs/tournament.py

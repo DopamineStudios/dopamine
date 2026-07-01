@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
 import pytz
 import re
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView, beacon_commands, preconditions
 
 from config import SSDB_PATH
-from dopamineframework import mod_check
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 
 SLOWMODE_INTERVALS = {
     "5 seconds": 5, "10 seconds": 10, "15 seconds": 15, "30 seconds": 30,
@@ -228,14 +229,14 @@ class ScheduledSlowmode(commands.Cog):
 
 
     slowmode_group = app_commands.Group(name="slowmode", description="Manage scheduled slowmode")
-    schedule_group = app_commands.Group(name="schedule", description="Configure slowmode schedules",
-                                        parent=slowmode_group)
+    schedule_group = beacon_commands.Group(name="schedule", description="Configure slowmode schedules",
+                                        parent=slowmode_group, permissions_preset="manager")
 
     @slowmode_group.command(name="configure", description="Directly configure slowmode for a channel.")
     @app_commands.describe(channel="The channel to configure slowmode for",
                            interval="The slowmode delay interval (or Disable)")
     @app_commands.autocomplete(interval=interval_autocomplete_with_disable)
-    @app_commands.check(mod_check)
+    @preconditions.has_permissions(manage_slowmode=True)
     async def configure_slowmode(self, interaction: discord.Interaction, channel: discord.TextChannel, interval: int):
         try:
             await channel.edit(slowmode_delay=interval)
@@ -260,7 +261,7 @@ class ScheduledSlowmode(commands.Cog):
                            timezone="Your timezone region", start_time="Start time (e.g., 14:00 or 02:00 PM)",
                            end_time="End time (e.g., 18:00 or 06:00 PM)")
     @app_commands.autocomplete(timezone=timezone_autocomplete, interval=interval_autocomplete)
-    @app_commands.check(mod_check)
+    @preconditions.has_permissions(manage_slowmode=True)
     async def schedule_start(self, interaction: discord.Interaction, channel: discord.TextChannel, interval: int,
                              timezone: str, start_time: str, end_time: str):
         if not await self.check_vote_access(interaction.user.id):
@@ -318,7 +319,7 @@ class ScheduledSlowmode(commands.Cog):
 
     @schedule_group.command(name="delete", description="Delete all slowmode schedules for a channel")
     @app_commands.describe(channel="The channel to clear schedules for")
-    @app_commands.check(mod_check)
+    @preconditions.has_permissions(manage_slowmode=True)
     async def schedule_delete(self, interaction: discord.Interaction, channel: discord.TextChannel):
         if channel.id not in self._schedule_cache or not self._schedule_cache[channel.id]:
             return await interaction.response.send_message(embed=discord.Embed(title="No Schedules",
@@ -361,18 +362,100 @@ class ScheduledSlowmode(commands.Cog):
                     target_delay = delay
                     break
 
+            channel = None
             try:
                 channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
                 if channel and channel.slowmode_delay != target_delay:
                     await channel.edit(slowmode_delay=target_delay)
-            except (discord.Forbidden, discord.NotFound):
+            except (discord.Forbidden, discord.NotFound) as e:
+                from utils.discord_health import report_access_failure
+                ch = self.bot.get_channel(channel_id)
+                gid = ch.guild.id if ch else None
+                if gid is None:
+                    for g in self.bot.guilds:
+                        if g.get_channel(channel_id):
+                            gid = g.id
+                            break
+                if gid:
+                    await report_access_failure(self.bot, gid, "slowmode", str(channel_id))
                 continue
             except Exception as e:
-                print(f"Error in slowmode monitor for channel {channel_id}: {e}")
+                from utils.discord_health import is_access_error, report_access_failure
+                if is_access_error(e) and isinstance(channel, discord.abc.GuildChannel):
+                    await report_access_failure(self.bot, channel.guild.id, "slowmode", str(channel_id))
 
     @slowmode_monitor.before_loop
     async def before_monitor(self):
         await self.bot.wait_until_ready()
+
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="slowmode",
+            name="Scheduled Slowmode",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="slowmode")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="slowmode")
+        async with self.acquire_db() as db:
+            rows = await export_table(
+                db, "SELECT * FROM slowmode_schedules WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"slowmode_schedules": rows}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="slowmode")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "slowmode":
+            return DataDeleteResult(feature_id="slowmode")
+        channel_ids = []
+        async with self.acquire_db() as db:
+            async with db.execute(
+                "SELECT DISTINCT channel_id FROM slowmode_schedules WHERE guild_id = ?", (guild_id,),
+            ) as cursor:
+                channel_ids = [row[0] async for row in cursor]
+            cur = await db.execute("DELETE FROM slowmode_schedules WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        for cid in channel_ids:
+            self._schedule_cache.pop(cid, None)
+        return DataDeleteResult(feature_id="slowmode", deleted=True, rows_affected=cur.rowcount)
+
+    async def _channel_manageable(self, guild: discord.Guild, channel_id: int) -> bool:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        if not isinstance(channel, discord.TextChannel) or channel.guild.id != guild.id:
+            return False
+        perms = channel.permissions_for(guild.me)
+        return perms.view_channel and perms.manage_channels
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        result = DataMonitorResult(feature_id="slowmode")
+        async with self.acquire_db() as db:
+            async with db.execute(
+                "SELECT DISTINCT channel_id FROM slowmode_schedules WHERE guild_id = ?", (guild.id,),
+            ) as cursor:
+                channel_ids = [row[0] async for row in cursor]
+        for channel_id in channel_ids:
+            if await self._channel_manageable(guild, channel_id):
+                continue
+            async with self.acquire_db() as db:
+                cur = await db.execute(
+                    "DELETE FROM slowmode_schedules WHERE guild_id = ? AND channel_id = ?",
+                    (guild.id, channel_id),
+                )
+                await db.commit()
+            self._schedule_cache.pop(channel_id, None)
+            result.actions.append(f"removed_schedules:{channel_id}")
+        return result
 
 
 async def setup(bot):

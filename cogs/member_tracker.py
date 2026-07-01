@@ -6,9 +6,15 @@ import asyncio
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 from config import MCTDB_PATH
-from dopamineframework import mod_check
 import re
-from dopamineframework import PrivateLayoutView
+from beacon import PrivateLayoutView, beacon_commands
+from utils.discord_health import (
+    channel_can_send,
+    is_access_error,
+    report_access_failure,
+    resolve_guild,
+    resolve_guild_channel,
+)
 
 
 class MemberTrackerEditModal(discord.ui.Modal, title="Edit Member Tracker Settings"):
@@ -267,7 +273,7 @@ class TrackerDashboard(PrivateLayoutView):
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                """### ➤ DOCUMENTATION\n\n**Available Variables**\n* `{count}` - Current member count of your server\n* `{remaining}` - Members remaining to reach the goal\n* `{goal}` - The member goal you've set\n* `{server}` - Name of your server\n**Example Formats**\n* `🎉 {count} members! Only {remaining} more to go!`\n* `{server} reached {count}! Goal: {goal}`\n**Notes**\n* You can customize it however you want, you don't have to use these examples!\n* {remaining} will only work if a goal is set."""))
+                """### ➤ DOCUMENTATION\n\n**Available Variables**\n* `{count}` - Current member count of your server\n* `{remaining}` - Members remaining to reach the goal\n* `{goal}` - The member goal you've set\n* `{server}` - Name of your server\n**Example Formats**\n* `🎉 {count} members! Only {remaining} more to go!`\n* `{server} reached {count}! Goal: {goal}`\n**Notes**\n* You can customize it however you want, you don't have to use these examples!\n* `{remaining}` will only work if a goal is set."""))
 
 
             edit_btn = discord.ui.Button(label="Edit Goal & Format", style=discord.ButtonStyle.primary)
@@ -489,9 +495,8 @@ class MemberCountTracker(commands.Cog):
         voter_cog = self.bot.get_cog('TopGGVoter')
         return await voter_cog.check_vote_access(user_id) if voter_cog else True
 
-    member = app_commands.Group(name="member", description="Member Tracker commands")
+    member = beacon_commands.Group(name="member", description="Member Tracker commands", permissions_preset="automation")
     @member.command(name="tracker", description="Open the dashboard for Member Tracker.")
-    @app_commands.check(mod_check)
     async def member_tracker_dashboard(self, interaction: discord.Interaction):
         view = TrackerDashboard(self, interaction.user, interaction.guild)
         await interaction.response.send_message(view=view)
@@ -504,10 +509,9 @@ class MemberCountTracker(commands.Cog):
 
         for data in active_trackers:
             guild_id = data['guild_id']
-            guild = self.bot.get_guild(guild_id) or await self.bot.get_guild(guild_id)
+            guild = await resolve_guild(self.bot, guild_id, feature_id="member_tracker")
             if not guild:
-                guild = await self.bot.fetch_guild(guild_id)
-            if not guild: continue
+                continue
 
             exclude_bots = data.get('exclude_bots', 0)
             if exclude_bots:
@@ -520,8 +524,16 @@ class MemberCountTracker(commands.Cog):
             if current_count <= last_count:
                 continue
 
-            channel = guild.get_channel(data['channel_id'])
-            if not channel: continue
+            channel_id = data['channel_id']
+            _, channel = await resolve_guild_channel(
+                self.bot, guild_id, channel_id, feature_id="member_tracker"
+            )
+            if not channel:
+                continue
+
+            if not channel_can_send(channel, guild):
+                await report_access_failure(self.bot, guild_id, "member_tracker", str(channel_id))
+                continue
 
             fmt = data['custom_format']
             goal = data['member_goal']
@@ -554,7 +566,68 @@ class MemberCountTracker(commands.Cog):
                         self.tracker_cache[guild_id]['last_member_count'] = current_count
                     await db.commit()
             except Exception as e:
-                print(f"Error in monitor for {guild_id}: {e}")
+                if is_access_error(e):
+                    await report_access_failure(self.bot, guild_id, "member_tracker")
+
+    def data_features(self) -> list:
+        from utils.data_protocol import DataFeatureMeta
+        return [DataFeatureMeta(feature_id="member_tracker", name="Member Tracker", guild_export=True, guild_delete=True)]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
+        from utils.data_protocol import DataExportChunk
+        return DataExportChunk(feature_id="member_tracker")
+
+    async def data_export_guild(self, guild_id: int):
+        from utils.data_handlers import export_table
+        from utils.data_protocol import DataExportChunk
+        chunk = DataExportChunk(feature_id="member_tracker")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM member_tracker WHERE guild_id = ?", (guild_id,))
+        if rows:
+            chunk.guild_data[guild_id] = {"tracker": rows[0]}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        return DataDeleteResult(feature_id="member_tracker")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None):
+        from utils.data_protocol import DataDeleteResult
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM member_tracker WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.tracker_cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="member_tracker", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild):
+        from utils.data_protocol import DataMonitorResult
+        result = DataMonitorResult(feature_id="member_tracker")
+        data = self.tracker_cache.get(guild.id)
+        if not data:
+            return result
+        channel_id = data.get("channel_id")
+        if not channel_id:
+            async with self.acquire_db() as db:
+                await db.execute(
+                    "UPDATE member_tracker SET is_active = 0 WHERE guild_id = ?", (guild.id,)
+                )
+                await db.commit()
+            self.tracker_cache.pop(guild.id, None)
+            result.actions.append("disabled_member_tracker")
+            return result
+        _, channel = await resolve_guild_channel(
+            self.bot, guild.id, channel_id, feature_id="member_tracker"
+        )
+        if channel and channel_can_send(channel, guild):
+            return result
+        async with self.acquire_db() as db:
+            await db.execute(
+                "UPDATE member_tracker SET is_active = 0 WHERE guild_id = ?", (guild.id,)
+            )
+            await db.commit()
+        self.tracker_cache.pop(guild.id, None)
+        result.actions.append("disabled_member_tracker")
+        return result
 
 
 async def setup(bot):

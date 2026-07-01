@@ -12,8 +12,11 @@ from discord.ext import commands
 from rapidfuzz import fuzz
 
 from config import ARSPDB_PATH
-from dopamineframework import PrivateLayoutView, mod_check
+from beacon import PrivateLayoutView, beacon_commands
 from cogs.embed import UseEmbedPage
+from utils.data_handlers import export_table
+from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+from utils.discord_health import is_access_error, report_access_failure
 import re
 
 
@@ -89,6 +92,37 @@ def apply_variables(text: str, message: discord.Message) -> str:
     for key, value in replacements.items():
         text = text.replace(key, value)
     return text
+
+class GoToPageModal(discord.ui.Modal):
+    def __init__(self, current_page: int, total_pages: int, parent_view: "ManageAutoresponsePage"):
+        super().__init__(title="Go to Page")
+        self.total_pages = total_pages
+        self.parent_view = parent_view
+
+        self.page_input = discord.ui.TextInput(
+            label=f"Enter Page Number (1-{total_pages})",
+            default=str(current_page),
+            required=True,
+            max_length=5,
+        )
+        self.add_item(self.page_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            target_page = int(self.page_input.value)
+            if not 1 <= target_page <= self.total_pages:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message(
+                f"Please enter a valid whole number between 1 and {self.total_pages}.",
+                ephemeral=True
+            )
+            return
+
+        self.parent_view.page = target_page
+        self.parent_view.autoresponses = self.parent_view.cog.get_guild_autoresponses(self.parent_view.guild_id)
+        self.parent_view.build_layout()
+        await interaction.response.edit_message(view=self.parent_view)
 
 class DestructiveConfirmationView(PrivateLayoutView):
     def __init__(self, user, record_id, cog, guild_id):
@@ -241,6 +275,7 @@ class ManageAutoresponsePage(PrivateLayoutView):
 
             nav_row = discord.ui.ActionRow()
             left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
+            goto_btn = discord.ui.Button(label=f"Page {self.page}", style=discord.ButtonStyle.secondary)
             right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= total_pages))
 
             async def prev_page(interaction: discord.Interaction):
@@ -255,9 +290,15 @@ class ManageAutoresponsePage(PrivateLayoutView):
                 self.build_layout()
                 await interaction.response.edit_message(view=self)
 
+            async def goto_page_callback(interaction: discord.Interaction):
+                modal = GoToPageModal(current_page=self.page, total_pages=total_pages, parent_view=self)
+                await interaction.response.send_modal(modal)
+
             left_btn.callback = prev_page
+            goto_btn.callback = goto_page_callback
             right_btn.callback = next_page
             nav_row.add_item(left_btn)
+            nav_row.add_item(goto_btn)
             nav_row.add_item(right_btn)
             container.add_item(nav_row)
 
@@ -897,12 +938,12 @@ class Autoresponse(commands.Cog):
 
     async def cog_unload(self):
         if self.db_pool is not None:
-            closing_tasks = []
             while not self.db_pool.empty():
-                conn = await self.db_pool.get()
-                closing_tasks.append(conn.close())
-            if closing_tasks:
-                await asyncio.gather(*closing_tasks, return_exceptions=True)
+                try:
+                    conn = self.db_pool.get_nowait()
+                    await conn.close()
+                except (asyncio.QueueEmpty, Exception):
+                    break
 
     async def init_pools(self, pool_size: int = 5):
         if self.db_pool is None:
@@ -1144,6 +1185,39 @@ class Autoresponse(commands.Cog):
         if guild_id in self.cache:
             self.cache[guild_id].pop(ar_id, None)
 
+    def data_features(self) -> list[DataFeatureMeta]:
+        return [DataFeatureMeta(
+            feature_id="autoresponse",
+            name="Autoresponse",
+            guild_export=True,
+            guild_delete=True,
+        )]
+
+    async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
+        return DataExportChunk(feature_id="autoresponse")
+
+    async def data_export_guild(self, guild_id: int) -> DataExportChunk:
+        chunk = DataExportChunk(feature_id="autoresponse")
+        async with self.acquire_db() as db:
+            rows = await export_table(db, "SELECT * FROM autoresponses WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"autoresponses": rows}
+        return chunk
+
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+        return DataDeleteResult(feature_id="autoresponse")
+
+    async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
+        if feature_id and feature_id != "autoresponse":
+            return DataDeleteResult(feature_id="autoresponse")
+        async with self.acquire_db() as db:
+            cur = await db.execute("DELETE FROM autoresponses WHERE guild_id = ?", (guild_id,))
+            await db.commit()
+        self.cache.pop(guild_id, None)
+        return DataDeleteResult(feature_id="autoresponse", deleted=True, rows_affected=cur.rowcount)
+
+    async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
+        return DataMonitorResult(feature_id="autoresponse")
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot:
@@ -1190,11 +1264,14 @@ class Autoresponse(commands.Cog):
                     embed = discord.Embed.from_dict(record.embed_data)
                     content_text = apply_variables(record.embed_content or "", message) if record.embed_content else None
                     await message.channel.send(content=content_text, embed=embed)
-            except Exception:
+            except Exception as e:
+                if is_access_error(e):
+                    await report_access_failure(
+                        self.bot, message.guild.id, "autoresponse", str(message.channel.id)
+                    )
                 continue
 
-    @app_commands.command(name="autoresponse", description="Open the Autoresponse Dashboard")
-    @app_commands.check(mod_check)
+    @beacon_commands.command(name="autoresponse", description="Open the Autoresponse Dashboard", permissions_preset="automation")
     async def autoresponse_dashboard(self, interaction: discord.Interaction):
         view = AutoresponseDashboard(interaction.user, self, interaction.guild.id)
         await interaction.response.send_message(view=view)
