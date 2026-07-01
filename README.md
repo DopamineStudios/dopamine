@@ -51,15 +51,13 @@ If you have any questions, suggestions, or issues, you can join the support serv
 
 # The Team
 
-Dopamine is developed by **Dopamine Studios**. However, contrary to what the name might suggest, I'm a solo dev and every single line of text and code here has been written by me, no one else.
-
-I started this project as a simple point-based moderation bot because I really like the concept - Now, it has evolved into a whole ecosystem of features within just six months.
+Dopamine is developed by **Dopamine Studios**. But as of the 1st of June 2026 i.e. the way I'm writing this, there haven't been any contributions to this project of Dopamine Studios other than me, Smite.
 
 # Installation & Setup
 
 ### Prerequisites:
 
-* Python 3.12 or higher.
+* Python 3.14 or higher.
 
 * A Discord Bot Token (via Discord Developer Portal)
 
