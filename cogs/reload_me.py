@@ -1,6 +1,7 @@
 import discord
 import importlib
 import config
+import VERSION
 from beacon import beacon_commands
 import beacon
 from discord import app_commands
@@ -58,6 +59,7 @@ class Reload(commands.Cog):
             importlib.import_module('beacon')
             load_dotenv(override=True)
             importlib.reload(config)
+            importlib.reload(VERSION)
             await ctx.send("👍️")
         except Exception as e:
             await ctx.send(f"Error: {e}")
