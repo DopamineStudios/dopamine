@@ -302,7 +302,7 @@ class SkullboardCog(commands.Cog):
     def get_skull_emoji(self, count: int) -> str:
         if count >= 15:
             return "☠"
-
+        else:
             return "💀"
 
     async def upsert_skull_post(self, guild_id: int, source_id: int, skullboard_id: int):
@@ -391,7 +391,6 @@ class SkullboardCog(commands.Cog):
         self._skullboard_tasks[mid] = self.bot.loop.create_task(self._process_skullboard_payload(payload))
 
     async def _process_skullboard_payload(self, payload: discord.RawReactionActionEvent):
-        await asyncio.sleep(0.5)
         try:
             guild = self.bot.get_guild(payload.guild_id) or await self.bot.fetch_guild(payload.guild_id)
             if not guild: return

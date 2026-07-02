@@ -27,7 +27,7 @@ class StatusCog(commands.Cog):
             f"✨ Watching {user_installs} User-installs",
             "✨ A charity case?",
             "✨ Am the open source underdog",
-            "✨ boy are you a dopamine? cuz i wanna make you dopaMINE!"
+            "✨ boy are you a dopamine? cuz i wanna make you dopaMINE!",
             "✨ Powered by Beacon Framework!",
             f"✨ Watching {total_members} Members",
             "✨ Watching downfall of GiveawayBoat",

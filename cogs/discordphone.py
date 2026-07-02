@@ -236,8 +236,17 @@ class DiscordPhone(commands.Cog):
                     if row[0] == "log_channel":
                         self.settings_cache["log_channel"] = int(row[1])
 
-    async def try_match(self, channel, user):
-
+    async def try_match(self, channel, user, interaction: discord.Interaction | commands.Context):
+        rules_str = "[DiscordPhone Rules](<https://docs.google.com/document/d/1ZuoKDQCrLMcY72PLW9kzTM7a1sS0y6mzyF_eNwV3low/edit?tab=t.0>)"
+        tos_str = "[Terms of Service](<https://docs.google.com/document/d/1kUC1P9aRNAwJD-HiP5v8HO-xowRiUGEbOZ-DfvOR2Tk/edit?usp=sharing>)"
+        if isinstance(interaction, discord.Interaction):
+            await interaction.response.send_message(
+                    f"<a:loading:1475121732108025929> You have successfully joined the queue! Waiting for another user...\nTo leave the queue, use `!!hangup` or `/discordphone hangup`.\n-# By continuing, you agree to the {rules_str} and {tos_str}. If you don't agree, stop using the bot.",
+                    )
+        else:
+            await interaction.send(
+                f"<a:loading:1475121732108025929> You have successfully joined the queue! Waiting for another user...\nTo leave the queue, use `!!hangup` or `/discordphone hangup`.\n-# By continuing, you agree to the {rules_str} and {tos_str}. If you don't agree, stop using the bot.",
+            )
         valid_partners = [
             (c_id, u_obj) for c_id, u_obj in self.queue
             if u_obj.id != self.last_partner.get(user.id) and u_obj.id != user.id
@@ -256,7 +265,7 @@ class DiscordPhone(commands.Cog):
             self.active_calls[chan_b.id] = call
             call.timeout_task = self.bot.loop.create_task(self.timeout_handler(call))
 
-            safe_msg = f"Connected! Say hi to the people on the other side!\nRemember, you can report problematic users: Click on three dots -> Apps -> Report DiscordPhone Message. Or, reply to the problematic message with `!!report <reason>`.\n-# Dopamine - a Dopamine Studios product. Providing the premium experience without the paywalls. [Click here](<https://top.gg/bot/1411266382380924938/invite>) to invite."
+            safe_msg = f"Connected! Say hi to the people on the other side!\n\nYou can report problematic users by:\n* Click on three dots -> Apps -> Report DiscordPhone Message.\n* Or reply to the problematic message with `!!report your-reason-here`."
 
             await chan_a.send(f"{partner_user.mention} {safe_msg}")
             await chan_b.send(f"{user.mention} {safe_msg}")
@@ -478,23 +487,14 @@ class DiscordPhone(commands.Cog):
             return await interaction.response.send_message("This channel is already in the matchmaking queue!", ephemeral=True)
 
         log_chan_id = self.settings_cache.get("log_channel")
-        log_channel = self.bot.get_channel(log_chan_id) if log_chan_id else None
+        log_channel = self.bot.get_channel(log_chan_id) or await self.bot.fetch_channel(log_chan_id) if log_chan_id else None
         if log_channel:
             await log_channel.send(
-                f" [QUEUE] Channel {interaction.channel.id} from {interaction.guild.name} joined queue.")
+                f" [QUEUE] Channel {interaction.channel.name} from {interaction.guild.name} joined queue.")
 
-        matched = await self.try_match(interaction.channel, interaction.user)
-        rules_str = "[DiscordPhone Rules](<https://docs.google.com/document/d/1ZuoKDQCrLMcY72PLW9kzTM7a1sS0y6mzyF_eNwV3low/edit?tab=t.0>)"
-        tos_str = "[Terms of Service](<https://docs.google.com/document/d/1kUC1P9aRNAwJD-HiP5v8HO-xowRiUGEbOZ-DfvOR2Tk/edit?tab=t.0>)"
-        if matched:
-            await interaction.response.send_message(f"<a:loading:1475121732108025929> You have successfully joined the queue! Waiting for another user...\n-# By continuing, you agree to the {rules_str} and {tos_str}. If you don't agree, stop using the bot.")
-        else:
+        matched = await self.try_match(interaction.channel, interaction.user, interaction)
+        if not matched:
             self.queue.append((interaction.channel.id, interaction.user))
-            await interaction.response.send_message(
-                f"<a:loading:1475121732108025929> You have successfully joined the queue! Waiting for another user...\n\nTo leave the queue, use `!!hangup` or `/discordphone hangup`.\n-# By continuing, you agree to the {rules_str} and {tos_str}. If you don't agree, stop using the bot.",
-                ephemeral=False)
-
-
 
     @dp_group.command(name="skip", description="Skip the current user")
     async def skip(self, interaction: discord.Interaction):
@@ -603,8 +603,9 @@ class DiscordPhone(commands.Cog):
 
         author_guild = self.bot.get_guild(author_guild_id) or await self.bot.fetch_guild(author_guild_id)
         reporter = self.bot.get_user(reporter_id) or await self.bot.fetch_user(reporter_id)
+        reporter_guild = self.bot.get_guild(reporter_guild_id) or await self.bot.fetch_guild(reporter_guild_id)
         embed = discord.Embed(
-            title=f"{target_msg['author_name']} from {author_guild.name} has been reported for the #{ordinal} time. Report made by {reporter.display_name}",
+            title=f"{target_msg['author_name']} from {author_guild.name} has been reported for the #{ordinal} time. Report made by {reporter.display_name} from {reporter_guild}.",
             color=discord.Color.red(),
             description=(
                 f"### ➤ Reason for Report: {reason}\n"
@@ -688,21 +689,14 @@ class DiscordPhone(commands.Cog):
 
         if any(c_id == ctx.channel.id for c_id, _ in self.queue):
             return await ctx.send("This channel is already in the matchmaking queue!")
-
-        matched = await self.try_match(ctx.channel, ctx.author)
-        rules_str = "[DiscordPhone Rules](<https://docs.google.com/document/d/1ZuoKDQCrLMcY72PLW9kzTM7a1sS0y6mzyF_eNwV3low/edit?tab=t.0>)"
-        tos_str = "[Terms of Service](<https://docs.google.com/document/d/1kUC1P9aRNAwJD-HiP5v8HO-xowRiUGEbOZ-DfvOR2Tk/edit?tab=t.0>)"
-        if matched:
-            await ctx.send(f"<a:loading:1475121732108025929> You have successfully joined the queue! Waiting for another user...\n-# By continuing, you agree to the {rules_str} and {tos_str}. If you don't agree, stop using the bot.")
-        else:
-            self.queue.append((ctx.channel.id, ctx.author))
-            await ctx.send(
-                f"<a:loading:1475121732108025929> You have successfully joined the queue! Waiting for another user...\n\nTo leave the queue, use `!!hangup` or `/discordphone hangup`.\n-# By continuing, you agree to the {rules_str} and {tos_str}. If you don't agree, stop using the bot.")
-
         log_chan_id = self.settings_cache.get("log_channel")
-        log_channel = self.bot.get_channel(log_chan_id) if log_chan_id else None
+        log_channel = self.bot.get_channel(log_chan_id) or await self.bot.fetch_channel(log_chan_id) if log_chan_id else None
         if log_channel:
-            await log_channel.send(f" [QUEUE] Channel {ctx.channel.id} from {ctx.guild.name} joined queue.")
+            await log_channel.send(f" [QUEUE] Channel {ctx.channel.name} from {ctx.guild.name} joined queue.")
+        matched = await self.try_match(ctx.channel, ctx.author, ctx)
+        if not matched:
+            self.queue.append((ctx.channel.id, ctx.author))
+
 
     @commands.command(name="skip")
     async def skip_prefix(self, ctx: commands.Context):

@@ -797,7 +797,7 @@ class Data(commands.Cog):
     async def di_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer()
         await self.refresh_insights_cache()
-        await interaction.edit_original_response(view=InsightsDashboard(self, interaction.user))
+        await interaction.edit_original_response(view=InsightsDashboard(self, interaction.user), ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

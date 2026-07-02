@@ -741,18 +741,18 @@ class Welcome(commands.Cog):
         embed = discord.Embed(
             description=(
                 "### Thank you for inviting me!\n\n"
-                "I'm a giveaway, moderation, discord phone and utility bot. I feature giveaway templates, completely customizable moderation, and more.\n\n"
+                "I'm a Moderation, Giveaways, DiscordPhone and utility bot. I feature completely customisable moderation with infraction cases, giveaway templates, and more.\n\n"
                 "**Use `/help` to get started! ^_^**\n\n"
-                "-# [**Vote**](https://top.gg/bot/1411266382380924938/vote) • [**Website**](https://dopamine-bot.pages.dev/) • [**Support Server**](https://discord.gg/VWDcymz648) • [**GitHub**](https://github.com/dopaminestudios/dopamine/)"
+                "-# [**Vote**](https://top.gg/bot/1411266382380924938/vote) • [**Website**](https://bot.dopaminestudios.in/) • [**Support Server**](https://discord.gg/VWDcymz648) • [**GitHub**](https://github.com/dopaminestudios/dopamine/)"
             ),
             color=discord.Color(0x944ae8)
         )
 
         embed.set_author(
-            name="Dopamine — Premium Experience, minus the Paywalls.",
+            name="Dopamine — The Premium Experience, minus the Paywalls.",
             icon_url=self.bot.user.display_avatar.url
         )
-        embed.set_footer(text="A Dopamine Studios product.")
+        embed.set_footer(text="An open-source project by Dopamine Studios.")
 
         target_channel = None
         keywords = ["general", "chat", "lounge", "gc"]
