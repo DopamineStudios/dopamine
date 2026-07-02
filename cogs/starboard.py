@@ -463,7 +463,6 @@ class StarboardCog(commands.Cog):
         self._starboard_tasks[mid] = self.bot.loop.create_task(self._process_starboard_payload(payload))
 
     async def _process_starboard_payload(self, payload: discord.RawReactionActionEvent):
-        await asyncio.sleep(0.5)
         try:
             guild = self.bot.get_guild(payload.guild_id) or await self.bot.fetch_guild(payload.guild_id)
             if not guild: return
