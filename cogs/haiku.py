@@ -115,7 +115,7 @@ class HaikuDetector(commands.Cog):
                              CREATE TABLE IF NOT EXISTS haiku_settings
                              (
                                  guild_id INTEGER PRIMARY KEY,
-                                 is_enabled INTEGER DEFAULT 0
+                                 is_disabled INTEGER DEFAULT 0
                              )
                              ''')
             await db.commit()
@@ -132,7 +132,7 @@ class HaikuDetector(commands.Cog):
 
     async def populate_caches(self):
         async with self.acquire_hd_db() as db:
-            async with db.execute("SELECT guild_id FROM haiku_settings WHERE is_enabled = 0") as cursor:
+            async with db.execute("SELECT guild_id FROM haiku_settings WHERE is_disabled = 1") as cursor:
                 rows = await cursor.fetchall()
                 self.disabled_guilds = {row[0] for row in rows}
 
@@ -410,7 +410,7 @@ class HaikuDetector(commands.Cog):
 
         async with self.acquire_hd_db() as db:
             await db.execute(
-                "INSERT OR REPLACE INTO haiku_settings (guild_id, is_enabled) VALUES (?, 1)",
+                "INSERT OR REPLACE INTO haiku_settings (guild_id, is_disabled) VALUES (?, 0)",
                 (interaction.guild.id,)
             )
             await db.commit()
@@ -446,7 +446,7 @@ class HaikuDetector(commands.Cog):
             return
 
         async with self.acquire_hd_db() as db:
-            await db.execute("UPDATE haiku_settings SET is_enabled = 0 WHERE guild_id = ?", (interaction.guild.id,))
+            await db.execute("UPDATE haiku_settings SET is_disabled = 1 WHERE guild_id = ?", (interaction.guild.id,))
             await db.commit()
         if not interaction.guild.id in self.disabled_guilds:
             self.disabled_guilds.add(interaction.guild.id)
