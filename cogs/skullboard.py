@@ -302,7 +302,7 @@ class SkullboardCog(commands.Cog):
     def get_skull_emoji(self, count: int) -> str:
         if count >= 15:
             return "☠"
-
+        else:
             return "💀"
 
     async def upsert_skull_post(self, guild_id: int, source_id: int, skullboard_id: int):
