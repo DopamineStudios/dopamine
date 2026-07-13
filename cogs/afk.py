@@ -42,10 +42,12 @@ class MissedPing:
 
 
 class ViewMissedPings(PrivateView):
-    def __init__(self, cog: "AFK", user_id: int, user: discord.User):
-        super().__init__(user, timeout=None)
+    def __init__(self, cog: "AFK", user_id: int, user: discord.User | discord.Member, string_for_after_missed_pings_clear: str):
+        super().__init__(user, timeout=120)
         self.cog = cog
         self.user_id = user_id
+        self.message = None
+        self.string_for_after_missed_pings_clear = string_for_after_missed_pings_clear
 
     @discord.ui.button(label="View Missed Pings", style=discord.ButtonStyle.primary)
     async def view_missed_pings(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -94,7 +96,13 @@ class ViewMissedPings(PrivateView):
         if sent:
             await interaction.response.send_message(
                 f"I sent the Missed Pings to your DMs! [Click here to Jump]({link}).", ephemeral=True)
+            await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
             await self.cog.clear_missed_pings(self.user_id)
+
+    async def on_timeout(self) -> None:
+        await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
+        await self.cog.clear_missed_pings(self.user_id)
+        self.stop()
 
 
 class AFK(commands.Cog):
@@ -372,7 +380,7 @@ class AFK(commands.Cog):
             return f"{member.display_name} is AFK: {state.status} - {ago}"
         return f"{member.display_name} is AFK - {ago}"
 
-    def _format_welcome_back(self, state: AFKState, missed_count: int) -> str:
+    def _format_welcome_back(self, state: AFKState, missed_count: int) -> tuple[str, str]:
         now = int(discord.utils.utcnow().timestamp())
         elapsed = max(0, now - state.started_at)
 
@@ -390,10 +398,11 @@ class AFK(commands.Cog):
             else:
                 base = f"Welcome back! You were AFK for **{hours}** hours!"
 
+        string_for_after_missed_pings_clear = base
         if missed_count > 0 and state.save_missed_pings:
             base += f"\nYou have **{missed_count}** missed pings!"
 
-        return base
+        return base, string_for_after_missed_pings_clear
 
     def _is_afk_active_in_context(self, state: AFKState, guild: Optional[discord.Guild]) -> bool:
         now = int(discord.utils.utcnow().timestamp())
@@ -478,11 +487,12 @@ class AFK(commands.Cog):
 
             if now >= state.buffer_until:
                 missed = self.missed_pings_cache.get(user_id, [])
-                content = self._format_welcome_back(state, len(missed))
-                view = ViewMissedPings(self, user_id, message.author) if missed and state.save_missed_pings else None
+                content, string_for_after_missed_pings_clear = self._format_welcome_back(state, len(missed))
+                view = ViewMissedPings(self, user_id, message.author, string_for_after_missed_pings_clear) if missed and state.save_missed_pings else None
 
                 try:
-                    await message.reply(content, view=view, mention_author=False)
+                    msg = await message.reply(content, view=view, mention_author=False)
+                    view.message = msg
                 except (discord.Forbidden, discord.HTTPException):
                     pass
 
@@ -532,7 +542,7 @@ class AFK(commands.Cog):
                     if not self._is_afk_active_in_context(state, message.guild):
                         continue
 
-                    member = message.guild.get_member(uid)
+                    member = message.guild.get_member(uid) or await message.guild.fetch_member(uid)
                     if not member or role not in member.roles:
                         continue
 
@@ -560,7 +570,7 @@ class AFK(commands.Cog):
         for user_id, entries in self.missed_pings_cache.items():
             for entry in entries:
                 if entry.message_id == message_id:
-                    entry.content = "*[This message was deleted]*"
+                    entry.content = "*This message was deleted*"
 
         async with self.acquire_db() as db:
             await db.execute(
