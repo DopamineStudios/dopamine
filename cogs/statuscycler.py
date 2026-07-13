@@ -26,6 +26,7 @@ class StatusCog(commands.Cog):
             "✨ Watching downfall of GiveawayBot",
             f"✨ Watching {user_installs} User-installs",
             "✨ A charity case?",
+            "✨ i got the best moderation bro",
             "✨ Am the open source underdog",
             "✨ boy are you a dopamine? cuz i wanna make you dopaMINE!",
             "✨ Powered by Beacon Framework!",
@@ -33,6 +34,7 @@ class StatusCog(commands.Cog):
             "✨ Watching downfall of GiveawayBoat",
             "✨ girl are you dopamine? cuz damn youre dopaFINE!",
             "✨ It's so hard being the best!",
+            "✨ moderator? i barely know her",
             "✨ Giving Sapphire a hug (aww!)"
         ]
 
