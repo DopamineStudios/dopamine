@@ -2725,6 +2725,7 @@ class Points(commands.Cog):
 
     @case_group.command(name="history", description="View all past warnings/points for a user.")
     async def case_history(self, interaction: discord.Interaction, user: discord.User):
+        await interaction.response.defer()
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})
         is_simple = settings.get("simple_mode", 0) == 1
@@ -2739,7 +2740,7 @@ class Points(commands.Cog):
             view = PrivateLayoutView(interaction.user, timeout=None)
             view.clear_items()
             view.add_item(container)
-            return await interaction.response.send_message(view=view)
+            return await interaction.edit_original_response(view=view)
 
         view = CaseUserHistoryPage(
             interaction.user, self, interaction.guild, user.id, cases, term
@@ -2766,6 +2767,7 @@ class Points(commands.Cog):
 
     @case_group.command(name="all", description="Browse all members with active warnings/points.")
     async def case_all(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         await self.guild_setup(interaction)
         settings = self.settings_cache.get(interaction.guild.id, {})
         is_simple = settings.get("simple_mode", 0) == 1
@@ -2773,7 +2775,7 @@ class Points(commands.Cog):
 
         view = AllActiveInfractionsPage(interaction.user, self, interaction.guild, term)
         await view.initialize()
-        await interaction.response.send_message(view=view)
+        await interaction.edit_original_response(view=view)
         view.message = await interaction.original_response()
 
     @case_group.command(name="delete", description="Delete a case and adjust the user's warnings/points.")
