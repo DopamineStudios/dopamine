@@ -716,14 +716,16 @@ class TemplateHomepage(PrivateLayoutView):
         self.add_item(container)
 
     async def browse_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(guild_id=interaction.guild.id, mode="browse")
         view = BrowsePage(self.cog, self.user, templates, interaction.guild.id, is_th=True)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
     async def mystuff_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(user_id=self.user.id, mode="mine")
         view = MystuffPage(self.cog, self.user, templates)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class MystuffPage(PrivateLayoutView):
@@ -1202,14 +1204,16 @@ class CreatewithtemplatePage(PrivateLayoutView):
             SearchModal("id_direct", self))
 
     async def browse_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(guild_id=interaction.guild.id, mode="browse")
         view = BrowsePage(self.cog, self.user, templates, interaction.guild.id)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
     async def my_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(user_id=self.user.id, mode="mine")
         view = MystuffUse(self.cog, self.user, templates)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
     async def back_callback(self, interaction: discord.Interaction):
         view = CreateChoose(self.cog, self.user)
