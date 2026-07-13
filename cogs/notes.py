@@ -203,6 +203,7 @@ class Notes(commands.Cog):
             super().__init__()
             self.cog = cog
             self.old_name = old_name
+            self.old_content = old_content
 
             self.note_name = discord.ui.TextInput(
                 label="Note Name",
@@ -265,7 +266,7 @@ class Notes(commands.Cog):
                     data={"old_name": self.old_name, "new_name": new_name, "old_content": self.old_content},
                     interaction=interaction
                 )
-                await interaction.response.send_message(embed=embed, view=undo_view, Ephemeral=True)
+                await interaction.response.send_message(embed=embed, view=undo_view, ephemeral=True)
 
             except Exception as e:
                 await interaction.response.send_message(f"Error updating note: {e}", ephemeral=True)
