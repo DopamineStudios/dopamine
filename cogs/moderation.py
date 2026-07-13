@@ -1592,6 +1592,7 @@ class AllActiveInfractionsPage(PrivateLayoutView):
 
     def create_cases_callback(self, user_id: int):
         async def callback(interaction: discord.Interaction):
+            await interaction.response.defer()
             self.pause_live()
             cases = await self.cog.get_user_infractions(self.guild_id, user_id)
             view = CaseUserHistoryPage(
