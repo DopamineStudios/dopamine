@@ -1592,12 +1592,13 @@ class AllActiveInfractionsPage(PrivateLayoutView):
 
     def create_cases_callback(self, user_id: int):
         async def callback(interaction: discord.Interaction):
+            await interaction.response.defer()
             self.pause_live()
             cases = await self.cog.get_user_infractions(self.guild_id, user_id)
             view = CaseUserHistoryPage(
                 self.user, self.cog, self.guild, user_id, cases, self.term, parent=self
             )
-            await interaction.response.edit_message(view=view)
+            await interaction.edit_original_response(view=view)
             view.message = self.message
         return callback
 
@@ -1616,7 +1617,6 @@ class AllActiveInfractionsPage(PrivateLayoutView):
 
     async def search_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(CaseUserSearchModal(self))
-
     async def clear_search_callback(self, interaction: discord.Interaction):
         self.search_query = None
         self.container_header = None
