@@ -12,6 +12,7 @@ from config import AFKDB_PATH
 from beacon import ViewPaginator, PrivateView
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+import datetime
 
 AFK_BUFFER_SECONDS = 30
 AFK_MAX_SECONDS = 72 * 60 * 60
@@ -41,6 +42,121 @@ class MissedPing:
     timestamp: int
 
 
+class GoToPageModal(discord.ui.Modal, title="Go to Page"):
+    page_input = discord.ui.TextInput(
+        label="Enter page number",
+        placeholder="e.g. 2",
+        min_length=1,
+        max_length=5
+    )
+
+    def __init__(self, paginator: "MissedPingsPaginator"):
+        super().__init__()
+        self.paginator = paginator
+        self.page_input.label = f"Enter page number (1-{paginator.total_pages})"
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            page = int(self.page_input.value)
+            if 1 <= page <= self.paginator.total_pages:
+                self.paginator.current_page = page
+                await self.paginator.update_message(interaction)
+            else:
+                await interaction.response.send_message(
+                    f"Invalid page number. Please enter a value between 1 and {self.paginator.total_pages}.",
+                    ephemeral=True
+                )
+        except ValueError:
+            await interaction.response.send_message(
+                "Please enter a valid whole number for the page number.",
+                ephemeral=True
+            )
+
+
+class MissedPingsPaginator(discord.ui.View):
+    def __init__(self, interaction: discord.Interaction, entries: list[MissedPing], cog: "AFK"):
+        super().__init__(timeout=180)
+        self.interaction = interaction
+        self.entries = entries
+        self.cog = cog
+        self.current_page = 1
+        self.per_page = 5
+        self.total_pages = (len(entries) + self.per_page - 1) // self.per_page
+        self.message: discord.Message | None = None
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_page.disabled = self.current_page == 1
+        self.go_to_page.disabled = self.total_pages == 1
+        self.go_to_page.label = f"Page {self.current_page} of {self.total_pages}"
+        self.next_page.disabled = self.current_page == self.total_pages
+
+    async def get_page_embeds(self) -> list[discord.Embed]:
+        start = (self.current_page - 1) * self.per_page
+        end = start + self.per_page
+        page_entries = self.entries[start:end]
+        embeds = []
+
+        for entry in page_entries:
+            guild = self.interaction.client.get_guild(entry.guild_id) if entry.guild_id else None
+            member = guild.get_member(entry.author_id) if guild else None
+            user = member or self.interaction.client.get_user(entry.author_id)
+            if not user:
+                try:
+                    user = await self.interaction.client.fetch_user(entry.author_id)
+                except discord.HTTPException:
+                    user = None
+
+            display_name = user.display_name if user else f"User {entry.author_id}"
+            avatar_url = user.display_avatar.url if user else None
+
+            embed = discord.Embed(colour=discord.Colour(0x944ae8))
+            embed.set_author(name=display_name, icon_url=avatar_url)
+
+            jump_link = f"[Click here to Jump](https://discord.com/channels/{entry.guild_id or '@me'}/{entry.channel_id or 0}/{entry.message_id or 0})"
+            content = entry.content
+            if len(content) > 1000:
+                content = content[:1000] + "..."
+
+            embed.description = f"{jump_link}\n\n{content}"
+            embed.set_footer(text=f"in {guild.name if guild else 'Unknown Server'}")
+            embed.timestamp = datetime.datetime.fromtimestamp(entry.timestamp, tz=datetime.timezone.utc).replace(tzinfo=None)
+            embeds.append(embed)
+
+        return embeds
+
+    async def send_initial(self) -> bool:
+        embeds = await self.get_page_embeds()
+        content = f"# {len(self.entries)} Missed Pings"
+        try:
+            self.message = await self.interaction.user.send(content=content, embeds=embeds, view=self)
+            return True
+        except discord.Forbidden:
+            return False
+
+    async def update_message(self, interaction: discord.Interaction):
+        self.update_buttons()
+        embeds = await self.get_page_embeds()
+        content = f"# {len(self.entries)} Missed Pings"
+        await interaction.response.edit_message(content=content, embeds=embeds, view=self)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 1:
+            self.current_page -= 1
+            await self.update_message(interaction)
+
+    @discord.ui.button(style=discord.ButtonStyle.secondary)
+    async def go_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GoToPageModal(self))
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            await self.update_message(interaction)
+
+
 class ViewMissedPings(PrivateView):
     def __init__(self, cog: "AFK", user_id: int, user: discord.User | discord.Member,
                  string_for_after_missed_pings_clear: str):
@@ -57,47 +173,18 @@ class ViewMissedPings(PrivateView):
         if not entries:
             return await interaction.response.send_message("You have no missed pings.", ephemeral=True)
 
-        lines: List[str] = []
-        for idx, entry in enumerate(entries, start=1):
-            guild = interaction.client.get_guild(entry.guild_id) if entry.guild_id else None
-            member = guild.get_member(entry.author_id) if guild else None
-            user = member or interaction.client.get_user(entry.author_id) or await interaction.client.fetch_user(
-                entry.author_id)
-            display_name = user.mention or (user.name if user else f"User {entry.author_id}")
-            msg_link = ""
-            if entry.guild_id and entry.channel_id and entry.message_id:
-                msg_link = f" [[Jump]](<https://discord.com/channels/{entry.guild_id}/{entry.channel_id}/{entry.message_id}>)"
-
-            lines.append(
-                f'{idx}. {display_name} in **{guild.name}**'
-                f'(<t:{entry.timestamp}:d> <t:{entry.timestamp}:t>): '
-                f'"{entry.content}"{msg_link}\n\n'
-            )
-
-        paginator = ViewPaginator(
-            title=f"{len(entries)} Missed Pings",
-            data=lines,
-            per_page=5,
-            color=discord.Color(0x944ae8),
-        )
-        try:
-            message = await interaction.user.send(
-                embed=paginator.format_embed(),
-                view=paginator
-            )
-            link = message.jump_url
-            sent = True
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                """I can't DM you the Missed Pings! Please first DM me "hi" so that Discord lets me DM you.""",
-                ephemeral=True)
-            sent = False
+        paginator = MissedPingsPaginator(interaction, entries, self.cog)
+        sent = await paginator.send_initial()
 
         if sent:
             await interaction.response.send_message(
-                f"I sent the Missed Pings to your DMs! [Click here to Jump]({link}).", ephemeral=True)
+                f"I sent the Missed Pings to your DMs! [Click here to Jump]({paginator.message.jump_url}).", ephemeral=True)
             await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
             await self.cog.clear_missed_pings(self.user_id)
+        else:
+            await interaction.response.send_message(
+                """I can't DM you the Missed Pings! Please first DM me "hi" so that Discord lets me DM you.""",
+                ephemeral=True)
 
     async def on_timeout(self) -> None:
         if self.message:
