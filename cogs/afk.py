@@ -42,7 +42,8 @@ class MissedPing:
 
 
 class ViewMissedPings(PrivateView):
-    def __init__(self, cog: "AFK", user_id: int, user: discord.User | discord.Member, string_for_after_missed_pings_clear: str):
+    def __init__(self, cog: "AFK", user_id: int, user: discord.User | discord.Member,
+                 string_for_after_missed_pings_clear: str):
         super().__init__(user, timeout=120)
         self.cog = cog
         self.user_id = user_id
@@ -51,7 +52,6 @@ class ViewMissedPings(PrivateView):
 
     @discord.ui.button(label="View Missed Pings", style=discord.ButtonStyle.primary)
     async def view_missed_pings(self, interaction: discord.Interaction, button: discord.ui.Button):
-
         entries = self.cog.missed_pings_cache.get(self.user_id, [])
 
         if not entries:
@@ -100,8 +100,46 @@ class ViewMissedPings(PrivateView):
             await self.cog.clear_missed_pings(self.user_id)
 
     async def on_timeout(self) -> None:
-        await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
+        if self.message:
+            try:
+                await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
+            except (discord.NotFound, discord.HTTPException):
+                pass
         await self.cog.clear_missed_pings(self.user_id)
+        self.stop()
+
+
+class ViewNotifyOnReturn(discord.ui.View):
+    """View attached to the AFK notice allowing users to be notified when the AFK target returns."""
+
+    def __init__(self, cog: "AFK", afk_user_id: int):
+        super().__init__(timeout=259200)
+        self.cog = cog
+        self.afk_user_id = afk_user_id
+        self.message = None
+
+    @discord.ui.button(label="DM me upon their grand return", style=discord.ButtonStyle.secondary,
+                       custom_id="afk_notify_on_return")
+    async def notify_me(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id == self.afk_user_id:
+            return await interaction.response.send_message("Don't you think this is a bit too narcissistic? You cannot register to be notified about your own grand return.",
+                                                           ephemeral=True)
+
+        if self.afk_user_id not in self.cog.afk_users:
+            return await interaction.response.send_message("This user is no longer AFK.", ephemeral=True)
+
+        success = await self.cog.add_notification_request(self.afk_user_id, interaction.user.id)
+        if success:
+            await interaction.response.send_message("Got it! You will now be DMed upon their grand return.", ephemeral=True)
+        else:
+            success = await self.cog.remove_notification_request(self.afk_user_id, interaction.user.id)
+            if success:
+                await interaction.response.send_message("You will no longer be notified upon their grand return. Sad.",
+                                                        ephemeral=True)
+            else:
+                await interaction.response.send_message("sum ting wong", ephemeral=True)
+    async def on_timeout(self) -> None:
+        await self.message.edit(view=None)
         self.stop()
 
 
@@ -111,6 +149,7 @@ class AFK(commands.Cog):
         self.db_pool: Optional[asyncio.Queue[aiosqlite.Connection]] = None
         self.afk_users: Dict[int, AFKState] = {}
         self.missed_pings_cache: Dict[int, List[MissedPing]] = {}
+        self.notification_cache: Dict[int, Set[int]] = {}
 
     async def cog_load(self):
         await self.init_pools()
@@ -196,6 +235,15 @@ class AFK(commands.Cog):
                 """
             )
             await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS return_notifications (
+                    afk_user_id INTEGER NOT NULL,
+                    observer_id INTEGER NOT NULL,
+                    PRIMARY KEY (afk_user_id, observer_id)
+                )
+                """
+            )
+            await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_missed_pings_user_id ON missed_pings (user_id, timestamp)"
             )
             await db.commit()
@@ -203,6 +251,7 @@ class AFK(commands.Cog):
     async def populate_caches(self):
         self.afk_users.clear()
         self.missed_pings_cache.clear()
+        self.notification_cache.clear()
 
         now = int(discord.utils.utcnow().timestamp())
 
@@ -229,6 +278,7 @@ class AFK(commands.Cog):
 
                     if now - started_at >= AFK_MAX_SECONDS:
                         await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
+                        await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ?", (user_id,))
                         continue
 
                     state = AFKState(
@@ -274,6 +324,42 @@ class AFK(commands.Cog):
                         timestamp=timestamp,
                     )
                     self.missed_pings_cache.setdefault(user_id, []).append(entry)
+
+            async with db.execute("SELECT afk_user_id, observer_id FROM return_notifications") as cursor:
+                rows = await cursor.fetchall()
+                for afk_uid, obs_id in rows:
+                    self.notification_cache.setdefault(afk_uid, set()).add(obs_id)
+
+    async def add_notification_request(self, afk_user_id: int, observer_id: int) -> bool:
+        observers = self.notification_cache.setdefault(afk_user_id, set())
+        if observer_id in observers:
+            return False
+
+        observers.add(observer_id)
+        async with self.acquire_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO return_notifications (afk_user_id, observer_id) VALUES (?, ?)",
+                (afk_user_id, observer_id)
+            )
+            await db.commit()
+        return True
+
+    async def remove_notification_request(self, afk_user_id: int, observer_id: int) -> bool:
+        observers = self.notification_cache.get(afk_user_id)
+        if not observers or observer_id not in observers:
+            return False
+
+        observers.discard(observer_id)
+        if not observers:
+            self.notification_cache.pop(afk_user_id, None)
+
+        async with self.acquire_db() as db:
+            await db.execute(
+                "DELETE FROM return_notifications WHERE afk_user_id = ? AND observer_id = ?",
+                (afk_user_id, observer_id)
+            )
+            await db.commit()
+        return True
 
     async def set_afk(
             self,
@@ -353,8 +439,22 @@ class AFK(commands.Cog):
                     except (discord.Forbidden, discord.HTTPException):
                         pass
 
+        observers = self.notification_cache.pop(user_id, set())
+        if observers:
+            afk_user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            afk_name = afk_user.mention if afk_user else f"User `{user_id}`"
+
+            for obs_id in observers:
+                obs_user = self.bot.get_user(obs_id) or await self.bot.fetch_user(obs_id)
+                if obs_user:
+                    try:
+                        await obs_user.send(f"{afk_name} has now made their grand return from being AFK! You should probably go talk to them or something.\n-# To not receive this in the future, don't click the big black button to be notified next time, duh.")
+                    except discord.Forbidden:
+                        pass
+
         async with self.acquire_db() as db:
             await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
+            await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ?", (user_id,))
             await db.commit()
 
     async def clear_missed_pings(self, user_id: int):
@@ -488,11 +588,13 @@ class AFK(commands.Cog):
             if now >= state.buffer_until:
                 missed = self.missed_pings_cache.get(user_id, [])
                 content, string_for_after_missed_pings_clear = self._format_welcome_back(state, len(missed))
-                view = ViewMissedPings(self, user_id, message.author, string_for_after_missed_pings_clear) if missed and state.save_missed_pings else None
+                view = ViewMissedPings(self, user_id, message.author,
+                                       string_for_after_missed_pings_clear) if missed and state.save_missed_pings else None
 
                 try:
                     msg = await message.reply(content, view=view, mention_author=False)
-                    view.message = msg
+                    if view:
+                        view.message = msg
                 except (discord.Forbidden, discord.HTTPException):
                     pass
 
@@ -529,7 +631,9 @@ class AFK(commands.Cog):
 
             notice = self._format_afk_notice(mentioned, state)
             try:
-                await message.channel.send(notice)
+                notify_view = ViewNotifyOnReturn(self, mentioned.id)
+                msg = await message.channel.send(notice, view=notify_view)
+                notify_view.message = msg
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
@@ -559,7 +663,9 @@ class AFK(commands.Cog):
                     if len(role.members) <= 3:
                         notice = self._format_afk_notice(member, state)
                         try:
-                            await message.channel.send(notice)
+                            notify_view = ViewNotifyOnReturn(self, member.id)
+                            msg = await message.channel.send(notice, view=notify_view)
+                            notify_view.message = msg
                         except (discord.Forbidden, discord.HTTPException):
                             pass
 
@@ -658,7 +764,8 @@ class AFK(commands.Cog):
     async def data_export_guild(self, guild_id: int) -> DataExportChunk:
         return DataExportChunk(feature_id="afk")
 
-    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None,
+                               feature_id: str | None) -> DataDeleteResult:
         if feature_id and feature_id != "afk":
             return DataDeleteResult(feature_id="afk")
         rows_affected = 0
@@ -667,9 +774,15 @@ class AFK(commands.Cog):
             rows_affected += cur.rowcount
             cur = await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
             rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ? OR observer_id = ?",
+                                   (user_id, user_id))
+            rows_affected += cur.rowcount
             await db.commit()
         self.afk_users.pop(user_id, None)
         self.missed_pings_cache.pop(user_id, None)
+        self.notification_cache.pop(user_id, None)
+        for uid in list(self.notification_cache.keys()):
+            self.notification_cache[uid].discard(user_id)
         return DataDeleteResult(feature_id="afk", deleted=True, rows_affected=rows_affected)
 
     async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
