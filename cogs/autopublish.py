@@ -119,46 +119,22 @@ class AutoPublish(commands.Cog):
         finally:
             await self.pool.release(conn)
 
-    async def channel_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
-        app_commands.Choice[str]]:
-        if not interaction.guild:
-            return []
-
-        choices = []
-        for channel_id in self.cache:
-            channel = interaction.guild.get_channel(channel_id) or await interaction.guild.fetch_channel(channel_id)
-            if channel and current.lower() in channel.name.lower():
-                choices.append(app_commands.Choice(name=channel.name, value=str(channel_id)))
-
-            if len(choices) >= 25:
-                break
-
-        return choices
-
     @autopublish_group.command(name="disable", description="Disable auto-publishing for a channel.")
-    @app_commands.autocomplete(channel_id=channel_autocomplete)
+    @app_commands.describe(channel="The announcement channel to disable auto-publish for.")
     @app_commands.checks.has_permissions(manage_channels=True)
-    async def ap_disable(self, interaction: discord.Interaction, channel_id: str):
-        try:
-            cid = int(channel_id)
-        except ValueError:
-            return await interaction.response.send_message("Invalid channel ID selection.", ephemeral=True)
-
-        if cid not in self.cache:
-            return await interaction.response.send_message("Auto-publish is not enabled for this channel!",
+    async def ap_disable(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if channel.id not in self.cache:
+            return await interaction.response.send_message(f"Auto-publish is not enabled for {channel.mention}!",
                                                            ephemeral=True)
 
         conn = await self.pool.acquire()
         try:
-            await conn.execute("DELETE FROM autopublish_channels WHERE channel_id = ?", (cid,))
+            await conn.execute("DELETE FROM autopublish_channels WHERE channel_id = ?", (channel.id,))
             await conn.commit()
 
-            self.cache.discard(cid)
+            self.cache.discard(channel.id)
 
-            channel = interaction.guild.get_channel(cid) or await interaction.guild.fetch_channel(cid)
-            name = channel.mention if channel else f"ID: {cid}"
-
-            await interaction.response.send_message(f"Auto-publish disabled for {name}.", ephemeral=True)
+            await interaction.response.send_message(f"Auto-publish disabled for {channel.mention}.", ephemeral=True)
         except Exception as e:
             print(f"DB Error on disable: {e}")
             await interaction.response.send_message("A database error occurred.", ephemeral=True)
