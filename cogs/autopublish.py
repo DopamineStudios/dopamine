@@ -9,7 +9,7 @@ from typing import List, Set
 from config import APDB_PATH
 
 from beacon import beacon_commands
-
+import collections
 
 class ConnectionPool:
 
@@ -46,6 +46,9 @@ class AutoPublish(commands.Cog):
         self.bot = bot
         self.pool = ConnectionPool(APDB_PATH, max_connections=5)
         self.cache: Set[int] = set()
+        self.publish_deque = collections.deque(maxlen=5)
+        self.new_item_event = asyncio.Event()
+        self.queue_task = None
 
     async def cog_load(self):
         await self.pool.init_pool()
@@ -65,9 +68,37 @@ class AutoPublish(commands.Cog):
                 self.cache = {row[0] for row in rows}
         finally:
             await self.pool.release(conn)
+        self.queue_task = asyncio.create_task(self.publish_worker())
 
     async def cog_unload(self):
+        if self.queue_task:
+            self.queue_task.cancel()
         await self.pool.close()
+
+    async def publish_worker(self):
+        DELAY_BETWEEN_PUBLISHES = 365
+
+        while True:
+            if not self.publish_deque:
+                self.new_item_event.clear()
+                await self.new_item_event.wait()
+
+            message = self.publish_deque.popleft()
+
+            try:
+                await message.publish()
+                await asyncio.sleep(DELAY_BETWEEN_PUBLISHES)
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    await asyncio.sleep(3600)
+                else:
+                    from utils.discord_health import is_access_error, report_access_failure
+                    if is_access_error(e) and message.guild:
+                        await report_access_failure(
+                            self.bot, message.guild.id, "autopublish", str(message.channel.id)
+                        )
+            except Exception:
+                pass
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -78,14 +109,9 @@ class AutoPublish(commands.Cog):
             return
 
         if message.channel.type == discord.ChannelType.news:
-            try:
-                await message.publish()
-            except (discord.Forbidden, discord.NotFound, discord.HTTPException) as e:
-                from utils.discord_health import is_access_error, report_access_failure
-                if is_access_error(e) and message.guild:
-                    await report_access_failure(
-                        self.bot, message.guild.id, "autopublish", str(message.channel.id)
-                    )
+            self.publish_deque.append(message)
+
+            self.new_item_event.set()
 
     autopublish_group = beacon_commands.Group(name="autopublish",
                                            description="Manage auto-publishing for announcement channels.")
