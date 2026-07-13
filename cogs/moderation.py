@@ -2622,7 +2622,7 @@ class Points(commands.Cog):
             undo_view.message = await interaction.followup.send(embed=embed, view=undo_view)
 
     @beacon_commands.command(name="pardon", description="Remove points/warnings from a user.", permissions_preset="moderator")
-    async def pardon(self, interaction: discord.Interaction, member: discord.Member, amount: int,
+    async def pardon(self, interaction: discord.Interaction, member: discord.User, amount: int,
                      reason: Optional[str] = None):
         await self.guild_setup(interaction)
         data = await self.get_user_data(interaction.guild.id, member.id)
