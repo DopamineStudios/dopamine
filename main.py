@@ -4,7 +4,7 @@ import asyncio
 import discord
 from config import TOKEN, LOGGING_DEBUG_MODE
 from logging.handlers import RotatingFileHandler
-from beacon import Bot
+from beacon import BeaconAutoShardedBot
 import traceback
 
 if not TOKEN:
@@ -40,13 +40,14 @@ intents.members = True
 intents.reactions = True
 
 
-bot = Bot(
+bot = BeaconAutoShardedBot(
     command_prefix="!!",
     cogs_path="cogs",
     version_file="VERSION.py",
     accent_colour=discord.Colour(0x944ae8),
-    minimal_cacheing=True,
-    intents=intents
+    minimal_caceing=True,
+    intents=intents,
+    bot_logger=logger
 )
 
 @bot.tree.context_menu(name="Get User ID")
