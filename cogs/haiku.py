@@ -38,7 +38,7 @@ class HaikuDetector(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.haiku_word_cache: Dict[str, int] = {}
-        self.disabled_guilds: Set[int] = set()
+        self.enabled_guilds: Set[int] = set()
 
         self.hd_pool: Optional[asyncio.Queue[aiosqlite.Connection]] = None
         self.hwd_pool: Optional[asyncio.Queue[aiosqlite.Connection]] = None
@@ -132,9 +132,9 @@ class HaikuDetector(commands.Cog):
 
     async def populate_caches(self):
         async with self.acquire_hd_db() as db:
-            async with db.execute("SELECT guild_id FROM haiku_settings WHERE is_enabled = 0") as cursor:
+            async with db.execute("SELECT guild_id FROM haiku_settings WHERE is_enabled = 1") as cursor:
                 rows = await cursor.fetchall()
-                self.disabled_guilds = {row[0] for row in rows}
+                self.enabled_guilds = {row[0] for row in rows}
 
         async with self.acquire_hwd_db() as db:
             async with db.execute("SELECT word, syllables FROM haiku_words") as cursor:
@@ -341,7 +341,7 @@ class HaikuDetector(commands.Cog):
         if message.guild is None or message.author.bot:
             return
 
-        if message.guild.id in self.disabled_guilds:
+        if message.guild.id not in self.enabled_guilds:
             return
 
         if message.id in self._recent_processed_messages:
@@ -388,7 +388,7 @@ class HaikuDetector(commands.Cog):
         async with self.acquire_hd_db() as db:
             cur = await db.execute("DELETE FROM haiku_settings WHERE guild_id = ?", (guild_id,))
             await db.commit()
-        self.disabled_guilds.add(guild_id)
+        self.enabled_guilds.add(guild_id)
         return DataDeleteResult(feature_id="haiku", deleted=True, rows_affected=cur.rowcount)
 
     async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
@@ -408,14 +408,23 @@ class HaikuDetector(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
+        if interaction.guild.id in self.enabled_guilds:
+            embed = discord.Embed(
+                title="Haiku Detection Already Active",
+                description="Haiku detection is already currently enabled in this server.",
+                color=discord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
         async with self.acquire_hd_db() as db:
             await db.execute(
                 "INSERT OR REPLACE INTO haiku_settings (guild_id, is_enabled) VALUES (?, 1)",
                 (interaction.guild.id,)
             )
             await db.commit()
-        if interaction.guild.id in self.disabled_guilds:
-            self.disabled_guilds.discard(interaction.guild.id)
+        if not interaction.guild.id in self.enabled_guilds:
+            self.enabled_guilds.add(interaction.guild.id)
 
         embed = discord.Embed(
             title="Haiku Detection Enabled",
@@ -427,16 +436,8 @@ class HaikuDetector(commands.Cog):
 
     @detection_group.command(name="disable", description="Disable haiku detection for the server")
     async def disable_haiku_detection(self, interaction: discord.Interaction):
-        if not await self.bot.get_cog('TopGGVoter').check_vote_access(interaction.user.id):
-            embed = discord.Embed(
-                title="Vote to Use This Feature!",
-                description=f"This command requires voting! To access this feature, please vote for Dopamine here: [top.gg](https://top.gg/bot/{self.bot.user.id})",
-                color=0xffaa00
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
 
-        if interaction.guild.id not in self.disabled_guilds:
+        if interaction.guild.id not in self.enabled_guilds:
             embed = discord.Embed(
                 title="Haiku Detection Not Active",
                 description="Haiku detection is not currently enabled in this server.",
@@ -448,8 +449,8 @@ class HaikuDetector(commands.Cog):
         async with self.acquire_hd_db() as db:
             await db.execute("UPDATE haiku_settings SET is_enabled = 0 WHERE guild_id = ?", (interaction.guild.id,))
             await db.commit()
-        if not interaction.guild.id in self.disabled_guilds:
-            self.disabled_guilds.add(interaction.guild.id)
+        if interaction.guild.id in self.enabled_guilds:
+            self.enabled_guilds.discard(interaction.guild.id)
 
         embed = discord.Embed(
             title="Haiku Detection Disabled",
