@@ -1298,7 +1298,7 @@ class MystuffUse(PrivateLayoutView):
         await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
 
     async def back_callback(self, interaction: discord.Interaction):
-        view = CreateChoose(self.cog, self.user)
+        view = CreatewithtemplatePage(self.cog, self.user)
         await interaction.response.edit_message(view=view)
 
 
