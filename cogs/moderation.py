@@ -2041,13 +2041,22 @@ class Points(commands.Cog):
                 await log_ch.send(embed=log_embed)
 
     async def resolve_user_display(self, guild: discord.Guild, user_id: int) -> str:
-        member = guild.get_member(user_id) or await guild.fetch_member(user_id) or await self.bot.fetch_user(user_id)
+        member = guild.get_member(user_id)
         if member:
             return f"{member.mention} (`{user_id}`)"
+
+        try:
+            member = await guild.fetch_member(user_id)
+            return f"{member.mention} (`{user_id}`)"
+        except discord.NotFound:
+            pass
+        except discord.HTTPException:
+            pass
+
         try:
             user = await self.bot.fetch_user(user_id)
             return f"**{user.display_name}** (`{user_id}`)"
-        except discord.NotFound:
+        except (discord.NotFound, discord.HTTPException):
             return f"Unknown User (`{user_id}`)"
 
     async def populate_caches(self):
