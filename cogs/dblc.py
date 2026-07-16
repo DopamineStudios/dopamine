@@ -2,7 +2,7 @@ import importlib
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from beacon import mod_check, ViewPaginator
+from beacon import ViewPaginator
 import VERSION
 import psutil
 import os
@@ -52,7 +52,6 @@ class Dblc(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @beacon_commands.command(name="purge", description="Delete recent messages.", permissions_preset="support")
-    @app_commands.check(mod_check)
     @app_commands.describe(number="Number of messages to delete (max 100)")
     async def purge(self, interaction: discord.Interaction, number: int):
         number = max(1, min(number, 100))
