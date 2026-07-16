@@ -1638,6 +1638,7 @@ class Giveaways(commands.Cog):
 
     async def init_db(self):
         async with self.acquire_db() as db:
+            await self._migrate_winner_role_to_text(db)
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS giveaways (
                     guild_id INTEGER,
@@ -1652,7 +1653,7 @@ class Giveaways(commands.Cog):
                     req_behaviour INTEGER,
                     blacklisted_roles TEXT,
                     extra_entry_roles TEXT,
-                    winner_role_id INTEGER,
+                    winner_role_id TEXT,
                     image_url TEXT,
                     thumbnail_url TEXT,
                     color TEXT,
@@ -1753,6 +1754,65 @@ class Giveaways(commands.Cog):
                     print(f"[Migration] Fixed template winners for {t_id}: '{w_count}' -> {new_count}")
 
         await db.commit()
+
+    async def _migrate_winner_role_to_text(self, db: aiosqlite.Connection):
+        """
+        Migrates the 'winner_role_id' column from INTEGER to TEXT to support
+        multiple role IDs.
+        """
+        async with db.execute("PRAGMA table_info(giveaways)") as cursor:
+            columns = await cursor.fetchall()
+            # column[1] is name, column[2] is type
+            winner_role_col = next((c for c in columns if c[1] == "winner_role_id"), None)
+
+            if not winner_role_col or winner_role_col[2].upper() != "TEXT":
+                return
+
+        self.bot.logger.info("[Migration] Detected winner_role_id is not TEXT. Starting migration...")
+
+        await db.execute('''
+            CREATE TABLE giveaways_new (
+                guild_id INTEGER,
+                giveaway_id INTEGER,
+                channel_id INTEGER,
+                message_id INTEGER,
+                prize TEXT,
+                winners_count INTEGER,
+                end_time INTEGER,
+                host_id INTEGER,
+                required_roles TEXT,
+                req_behaviour INTEGER,
+                blacklisted_roles TEXT,
+                extra_entry_roles TEXT,
+                winner_role_id TEXT,  -- This is now TEXT
+                image_url TEXT,
+                thumbnail_url TEXT,
+                color TEXT,
+                ended INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, giveaway_id)
+            )
+        ''')
+
+        await db.execute('''
+            INSERT INTO giveaways_new (
+                guild_id, giveaway_id, channel_id, message_id, prize, 
+                winners_count, end_time, host_id, required_roles, 
+                req_behaviour, blacklisted_roles, extra_entry_roles, 
+                winner_role_id, image_url, thumbnail_url, color, ended
+            )
+            SELECT 
+                guild_id, giveaway_id, channel_id, message_id, prize, 
+                winners_count, end_time, host_id, required_roles, 
+                req_behaviour, blacklisted_roles, extra_entry_roles, 
+                winner_role_id, image_url, thumbnail_url, color, ended
+            FROM giveaways
+        ''')
+
+        await db.execute("DROP TABLE giveaways")
+        await db.execute("ALTER TABLE giveaways_new RENAME TO giveaways")
+
+        await db.commit()
+        print("[Migration] winner_role_id successfully migrated to TEXT.")
 
     async def populate_caches(self):
         self.giveaway_cache.clear()
