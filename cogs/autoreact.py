@@ -49,7 +49,8 @@ class CreatePanelModal(discord.ui.Modal):
 
         parsed = self.cog.parse_emoji_input(emoji_raw)
         if not (0 < len(parsed) <= 3):
-            return await interaction.response.send_message("Provide 1-3 valid emojis.", ephemeral=True)
+            await interaction.response.send_message("Provide 1-3 valid emojis.", ephemeral=True)
+            return
 
         guild_panels = [p for (g, pid), p in self.cog.panel_cache.items() if g == self.guild_id]
         existing_ids = {p['panel_id'] for p in guild_panels}
@@ -100,7 +101,8 @@ class EditPanelDetailsModal(discord.ui.Modal):
         parsed = self.cog.parse_emoji_input(self.emoji_input.value)
 
         if not (0 < len(parsed) <= 3):
-            return await interaction.response.send_message("Provide 1-3 valid emojis.", ephemeral=True)
+            await interaction.response.send_message("Provide 1-3 valid emojis.", ephemeral=True)
+            return
 
         serialized = self.cog.serialize_emojis(parsed)
 
@@ -189,14 +191,16 @@ class AutoreactDashboard(PrivateLayoutView):
 
     async def create_callback(self, interaction: discord.Interaction):
         if not await self.cog.bot.get_cog('TopGGVoter').check_vote_access(interaction.user.id):
-            return await interaction.response.send_message("Vote required to use this feature.", ephemeral=True)
-
-        view = CreateChannelSelect(self.user, self.cog, interaction.guild.id)
-        await interaction.response.send_message(view=view, ephemeral=True)
+            await interaction.response.send_message("Vote required to use this feature.", ephemeral=True)
+            return
+        if interaction.guild is not None:
+            view = CreateChannelSelect(self.user, self.cog, interaction.guild.id)
+            await interaction.response.send_message(view=view, ephemeral=True)
 
     async def manage_callback(self, interaction: discord.Interaction):
-        view = ManagePage(self.user, self.cog, interaction.guild.id)
-        await interaction.response.edit_message(content=None, embed=None, view=view)
+        if interaction.guild is not None:
+            view = ManagePage(self.user, self.cog, interaction.guild.id)
+            await interaction.response.edit_message(content=None, embed=None, view=view)
 
 
 class ManagePage(PrivateLayoutView):
@@ -250,7 +254,8 @@ class ManagePage(PrivateLayoutView):
             left_btn.callback = self.prev_page
 
             go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary, disabled=(total_pages <= 1))
-            go_btn.callback = lambda i: i.response.send_modal(GoToPageModal(self, total_pages))
+            # pyrefly: ignore [no-matching-overload]
+            go_btn.callback = lambda interaction: interaction.response.send_modal(GoToPageModal(self, total_pages))
 
             right_btn = discord.ui.Button(emoji="▶", style=discord.ButtonStyle.primary, disabled=(self.page == total_pages))
             right_btn.callback = self.next_page
@@ -400,7 +405,7 @@ class EditPage(PrivateLayoutView):
     async def delete_panel(self, interaction: discord.Interaction):
         view = DestructiveConfirmationView(self.user, self.panel['name'], self.cog, self.panel['guild_id'],
                                            self.panel['panel_id'])
-        await interaction.response.send_message(content=None, embed=None, view=view)
+        await interaction.response.send_message(view=view)
 
     async def toggle_whitelist(self, interaction: discord.Interaction):
         if self.panel['member_whitelist']:
@@ -473,7 +478,7 @@ class EditChannelSelect(PrivateLayoutView):
         self.cog = cog
         self.guild_id = guild_id
         self.is_rebind = is_rebind
-        self.panel_data = panel_data
+        self.panel_data = panel_data if panel_data is not None else {}
         self.build_layout()
 
     def build_layout(self):
@@ -495,7 +500,6 @@ class EditChannelSelect(PrivateLayoutView):
 
     async def select_callback(self, interaction: discord.Interaction):
         new_channel_id = self.select.values[0].id
-
         async with self.cog.acquire_db() as db:
             await db.execute(
                 "UPDATE autoreact_panels SET channel_id = ? WHERE guild_id = ? AND panel_id = ?",
@@ -515,7 +519,7 @@ class MemberSelect(PrivateLayoutView):
         self.cog = cog
         self.guild_id = guild_id
         self.is_rebind = is_rebind
-        self.panel_data = panel_data
+        self.panel_data = panel_data if panel_data is not None else {}
         self.build_layout()
 
     def build_layout(self):
@@ -611,21 +615,11 @@ class DestructiveConfirmationView(PrivateLayoutView):
         self.value = False
         await self.update_view(interaction, "Action Canceled", discord.Color(0xdf5046))
 
-        view = EditPage(self.user, self.cog, self.cog.panel_cache[(self.guild_id, self.panel_id)])
-        await interaction.followup.send("Returned to edit menu.", ephemeral=True, view=view)
-
     async def confirm_callback(self, interaction: discord.Interaction):
         self.value = True
         await self.update_view(interaction, "Action Confirmed", discord.Color.green())
         await self.cog.delete_panel(self.guild_id, self.panel_id)
 
-        view = AutoreactDashboard(self.user, self.cog)
-        await interaction.followup.send("Returned to dashboard.", ephemeral=True, view=view)
-
-    async def on_timeout(self, interaction: discord.Interaction):
-        if self.value is None:
-            self.value = False
-            await self.update_view(interaction, "Timed Out", discord.Color(0xdf5046))
 
 
 class AutoReact(commands.Cog):
@@ -680,6 +674,8 @@ class AutoReact(commands.Cog):
 
     @asynccontextmanager
     async def acquire_db(self):
+        if self.db_pool is None:
+            return
         conn = await self.db_pool.get()
         try:
             yield conn

@@ -1,10 +1,11 @@
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple, Set, Any, AsyncGenerator
 
 import aiosqlite
 import discord
+from aiosqlite import Connection
 from discord import app_commands
 from discord.ext import commands
 
@@ -177,9 +178,11 @@ class ViewMissedPings(PrivateView):
         sent = await paginator.send_initial()
 
         if sent:
-            await interaction.response.send_message(
-                f"I sent the Missed Pings to your DMs! [Click here to Jump]({paginator.message.jump_url}).", ephemeral=True)
-            await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
+            if not paginator.message is None:
+                await interaction.response.send_message(
+                    f"I sent the Missed Pings to your DMs! [Click here to Jump]({paginator.message.jump_url}).", ephemeral=True)
+            if not self.message is None:
+                await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
             await self.cog.clear_missed_pings(self.user_id)
         else:
             await interaction.response.send_message(
@@ -226,7 +229,8 @@ class ViewNotifyOnReturn(discord.ui.View):
             else:
                 await interaction.response.send_message("sum ting wong", ephemeral=True)
     async def on_timeout(self) -> None:
-        await self.message.edit(view=None)
+        if self.message:
+            await self.message.edit(view=None)
         self.stop()
 
 
@@ -253,7 +257,7 @@ class AFK(commands.Cog):
                     break
             self.db_pool = None
 
-    async def create_pooled_connection(self, path: str) -> aiosqlite.Connection:
+    async def create_pooled_connection(self, path: str) -> Connection | None:
         max_retries = 5
         for attempt in range(max_retries):
             try:
@@ -279,10 +283,11 @@ class AFK(commands.Cog):
             self.db_pool = asyncio.Queue(maxsize=pool_size)
             for _ in range(pool_size):
                 conn = await self.create_pooled_connection(AFKDB_PATH)
-                await self.db_pool.put(conn)
+                if not conn is None:
+                    await self.db_pool.put(conn)
 
     @asynccontextmanager
-    async def acquire_db(self) -> aiosqlite.Connection:
+    async def acquire_db(self) -> AsyncGenerator[Connection, Any]:
         assert self.db_pool is not None
         conn = await self.db_pool.get()
         try:
@@ -550,7 +555,7 @@ class AFK(commands.Cog):
             await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
             await db.commit()
 
-    def _format_afk_notice(self, member: discord.Member, state: AFKState) -> str:
+    def _format_afk_notice(self, member: discord.Member | discord.User, state: AFKState) -> str:
         now = int(discord.utils.utcnow().timestamp())
         elapsed = max(0, now - state.started_at)
 
@@ -679,9 +684,12 @@ class AFK(commands.Cog):
                                        string_for_after_missed_pings_clear) if missed and state.save_missed_pings else None
 
                 try:
-                    msg = await message.reply(content, view=view, mention_author=False)
+
                     if view:
+                        msg = await message.reply(content, view=view, mention_author=False)
                         view.message = msg
+                    else:
+                        await message.reply(content, mention_author=False)
                 except (discord.Forbidden, discord.HTTPException):
                     pass
 
@@ -804,7 +812,8 @@ class AFK(commands.Cog):
             )
             await db.commit()
             mp_id = cursor.lastrowid
-
+        if mp_id is None:
+            return
         entry = MissedPing(
             id=mp_id,
             user_id=user_id,
