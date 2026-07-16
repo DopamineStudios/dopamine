@@ -1711,6 +1711,49 @@ class Giveaways(commands.Cog):
 
             await db.commit()
 
+            await self._run_migrations(db)
+
+    async def _run_migrations(self, db: aiosqlite.Connection):
+        """
+        Automatically fixes data type mismatches in the database.
+        """
+        async with db.execute("SELECT giveaway_id, guild_id, winners_count FROM giveaways") as cursor:
+            async for row in cursor:
+                g_id, guild_id, w_count = row
+
+
+                if isinstance(w_count, str):
+                    try:
+                        new_count = int(w_count)
+                    except ValueError:
+                        # If it's "123,456" (the role ID bug), we can't know the real count.
+                        # Default to 1 to prevent the bot from crashing.
+                        new_count = 1
+
+                    await db.execute(
+                        "UPDATE giveaways SET winners_count = ? WHERE giveaway_id = ? AND guild_id = ?",
+                        (new_count, g_id, guild_id)
+                    )
+                    print(
+                        f"[Migration] Fixed winners_count for giveaway {g_id} in guild {guild_id}: '{w_count}' -> {new_count}")
+
+        async with db.execute("SELECT template_id, winners FROM templates") as cursor:
+            async for row in cursor:
+                t_id, w_count = row
+                if isinstance(w_count, str):
+                    try:
+                        new_count = int(w_count)
+                    except ValueError:
+                        new_count = 1
+
+                    await db.execute(
+                        "UPDATE templates SET winners = ? WHERE template_id = ?",
+                        (new_count, t_id)
+                    )
+                    print(f"[Migration] Fixed template winners for {t_id}: '{w_count}' -> {new_count}")
+
+        await db.commit()
+
     async def populate_caches(self):
         self.giveaway_cache.clear()
         self.participant_cache.clear()
@@ -1964,14 +2007,14 @@ class Giveaways(commands.Cog):
             "channel_id": draft.channel_id,
             "message_id": message_id,
             "prize": draft.prize,
-            "winners_count": winner_roles,
+            "winners_count": draft.winners,
             "end_time": end_time,
             "host_id": draft.host_id,
             "required_roles": req_roles,
             "req_behaviour": draft.required_behaviour,
             "blacklisted_roles": black_roles,
             "extra_entry_roles": extra_roles,
-            "winner_role_id": draft.winner_role,
+            "winner_role_id": winner_roles,
             "image_url": draft.image,
             "thumbnail_url": draft.thumbnail,
             "color": draft.color,
@@ -2027,7 +2070,7 @@ class Giveaways(commands.Cog):
             "creator_id": interaction.user.id,
             "creation_guild_id": interaction.guild.id,
             "prize": draft.prize,
-            "winners": winner_roles,
+            "winners": draft.winners,
             "duration": draft.duration,
             "channel_id": draft.channel_id,
             "host_id": draft.host_id,
@@ -2035,7 +2078,7 @@ class Giveaways(commands.Cog):
             "req_behaviour": draft.required_behaviour,
             "blacklisted_roles": black_roles,
             "extra_entries": extra_roles,
-            "winner_role_id": draft.winner_role,
+            "winner_role_id": winner_roles,
             "image": draft.image,
             "thumbnail": draft.thumbnail,
             "color": draft.color
