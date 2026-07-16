@@ -45,7 +45,7 @@ bot = BeaconAutoShardedBot(
     cogs_path="cogs",
     version_file="VERSION.py",
     accent_colour=discord.Colour(0x944ae8),
-    minimal_caceing=True,
+    minimal_caching=True,
     intents=intents,
     bot_logger=logger
 )
