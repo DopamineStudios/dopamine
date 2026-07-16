@@ -1564,9 +1564,13 @@ class AllActiveInfractionsPage(PrivateLayoutView):
         control_row.add_item(clear_btn)
         container.add_item(control_row)
 
+        settings = self.cog.settings_cache.get(self.guild.id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "Warnings" if is_simple else "Points"
+
         sort_options = [
-            discord.SelectOption(label="Most Points", value=self.SORT_MOST),
-            discord.SelectOption(label="Least Points", value=self.SORT_LEAST),
+            discord.SelectOption(label=f"Most {term}", value=self.SORT_MOST),
+            discord.SelectOption(label="Least {term}", value=self.SORT_LEAST),
             discord.SelectOption(label="Most Recent Punishment", value=self.SORT_RECENT),
             discord.SelectOption(label="Oldest Punishment", value=self.SORT_OLDEST),
             discord.SelectOption(label="Alphabetical (A–Z)", value=self.SORT_ALPHA),
@@ -1643,6 +1647,203 @@ class AllActiveInfractionsPage(PrivateLayoutView):
         self.build_layout()
         await interaction.response.edit_message(view=self)
 
+
+class AllCasesPage(PrivateLayoutView):
+    SORT_NEWEST = "newest"
+    SORT_OLDEST = "oldest"
+    SORT_HIGHEST = "highest"
+    SORT_LOWEST = "lowest"
+    SORT_CASE_ASC = "case_asc"
+    SORT_CASE_DESC = "case_desc"
+
+    def __init__(self, user, cog, guild: discord.Guild, term: str, page: int = 1,
+                 current_sort: str = SORT_NEWEST, search_query: str = None,
+                 container_header: str = None):
+        super().__init__(user, timeout=None)
+        self.cog = cog
+        self.guild = guild
+        self.guild_id = guild.id
+        self.term = term
+        self.page = page
+        self.per_page = 5
+        self.current_sort = current_sort
+        self.search_query = search_query
+        self.container_header = container_header
+        self.entries: List[dict] = []
+        self.filtered_entries: List[dict] = []
+        self.total_pages = 1
+        self.message: Optional[discord.Message] = None
+        self.build_layout()
+
+    async def initialize(self):
+        await self.refresh_data()
+        self.build_layout()
+
+    async def refresh_data(self):
+        self.entries = await self.cog.get_all_infractions(self.guild_id)
+        self.apply_filter()
+        self.apply_sort()
+        self.total_pages = max(1, (len(self.filtered_entries) - 1) // self.per_page + 1) if self.filtered_entries else 1
+        self.page = min(self.page, self.total_pages)
+
+    def apply_filter(self):
+        if self.search_query:
+            q = self.search_query.lower()
+            self.filtered_entries = [
+                e for e in self.entries
+                if q in str(e["case_number"]) or q in str(e["user_id"]) or (e["reason"] and q in e["reason"].lower())
+            ]
+        else:
+            self.filtered_entries = list(self.entries)
+
+    def apply_sort(self):
+        if self.current_sort == self.SORT_NEWEST:
+            self.entries.sort(key=lambda x: x["created_at"], reverse=True)
+        elif self.current_sort == self.SORT_OLDEST:
+            self.entries.sort(key=lambda x: x["created_at"])
+        elif self.current_sort == self.SORT_HIGHEST:
+            self.entries.sort(key=lambda x: x["amount"], reverse=True)
+        elif self.current_sort == self.SORT_LOWEST:
+            self.entries.sort(key=lambda x: x["amount"])
+        elif self.current_sort == self.SORT_CASE_ASC:
+            self.entries.sort(key=lambda x: x["case_number"])
+        elif self.current_sort == self.SORT_CASE_DESC:
+            self.entries.sort(key=lambda x: x["case_number"], reverse=True)
+
+    def build_layout(self):
+        self.clear_items()
+        container = discord.ui.Container()
+
+        count_text = f"{len(self.filtered_entries)} Total Cases"
+        if not self.container_header:
+            header = f"## Case Log — {count_text}"
+        else:
+            header = f"## {self.container_header}"
+
+        container.add_item(discord.ui.TextDisplay(header))
+        container.add_item(discord.ui.TextDisplay(
+            f"Browsing all recorded infractions. Use search to find specific Case IDs or User IDs."))
+        container.add_item(discord.ui.Separator())
+
+        start = (self.page - 1) * self.per_page
+        current = self.filtered_entries[start:start + self.per_page]
+
+        if not current:
+            container.add_item(discord.ui.TextDisplay("*No cases found matching your criteria.*"))
+        else:
+            for idx, case in enumerate(current, start + 1):
+                user_mention = f"<@{case['user_id']}>"
+
+                last_p = f"<t:{case['created_at']}:R>"
+                title = f"### Case #{case['case_number']} • +{case['amount']} {self.term}(s)"
+                desc = (
+                    f"**User:** {user_mention} (`{case['user_id']}`)\n"
+                    f"**Moderator:** <@{case['moderator_id']}>\n"
+                    f"**Date:** {last_p}\n"
+                    f"**Reason:** {case['reason'] or 'No reason provided.'}"
+                )
+
+                view_btn = discord.ui.Button(label="View Details", style=discord.ButtonStyle.primary)
+                view_btn.callback = self.create_details_callback(case)
+                container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=view_btn))
+
+        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
+        container.add_item(discord.ui.Separator())
+
+        nav_row = discord.ui.ActionRow()
+        left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
+        left_btn.callback = self.prev_page
+        go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary,
+                                   disabled=(self.total_pages <= 1))
+        go_btn.callback = self.go_to_page_callback
+        right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
+                                      disabled=(self.page >= self.total_pages))
+        right_btn.callback = self.next_page
+        nav_row.add_item(left_btn)
+        nav_row.add_item(go_btn)
+        nav_row.add_item(right_btn)
+        container.add_item(nav_row)
+
+        control_row = discord.ui.ActionRow()
+        search_btn = discord.ui.Button(label="Search", style=discord.ButtonStyle.primary)
+        search_btn.callback = self.search_callback
+        clear_btn = discord.ui.Button(label="Clear Search", style=discord.ButtonStyle.secondary,
+                                      disabled=(not self.search_query))
+        clear_btn.callback = self.clear_search_callback
+        control_row.add_item(search_btn)
+        control_row.add_item(clear_btn)
+        container.add_item(control_row)
+
+        settings = self.cog.settings_cache.get(self.guild.id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "Warnings" if is_simple else "Points"
+
+        sort_options = [
+            discord.SelectOption(label="Newest First", value=self.SORT_NEWEST),
+            discord.SelectOption(label="Oldest First", value=self.SORT_OLDEST),
+            discord.SelectOption(label=f"Highest {term}", value=self.SORT_HIGHEST),
+            discord.SelectOption(label=f"Lowest {term}", value=self.SORT_LOWEST),
+            discord.SelectOption(label="Case ID (Ascending)", value=self.SORT_CASE_ASC),
+            discord.SelectOption(label="Case ID (Descending)", value=self.SORT_CASE_DESC),
+        ]
+        for opt in sort_options:
+            if opt.value == self.current_sort:
+                opt.default = True
+
+        sort_dropdown = discord.ui.Select(placeholder="Sort by...", options=sort_options)
+        sort_dropdown.callback = self.sort_callback
+        container.add_item(discord.ui.ActionRow(sort_dropdown))
+
+        container.add_item(discord.ui.Separator())
+        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn.callback = self.return_home
+        container.add_item(discord.ui.ActionRow(return_btn))
+
+        self.add_item(container)
+
+    def create_details_callback(self, case):
+        async def callback(interaction: discord.Interaction):
+            view = CaseDetailPage(self.user, self.cog, self.guild, case, self.term)
+            await interaction.response.edit_message(view=view)
+            view.message = self.message
+
+        return callback
+
+    async def prev_page(self, interaction: discord.Interaction):
+        self.page -= 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def next_page(self, interaction: discord.Interaction):
+        self.page += 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def go_to_page_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
+
+    async def search_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(CaseUserSearchModal(self))
+
+    async def clear_search_callback(self, interaction: discord.Interaction):
+        self.search_query = None
+        self.container_header = None
+        self.page = 1
+        await self.refresh_data()
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def sort_callback(self, interaction: discord.Interaction):
+        self.current_sort = interaction.data["values"][0]
+        self.page = 1
+        self.apply_sort()
+        self.apply_filter()
+        self.total_pages = max(1, (len(self.filtered_entries) - 1) // self.per_page + 1) if self.filtered_entries else 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def return_home(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(view=ModerationDashboard(self.user, self.cog))
 
 class Points(commands.Cog):
     def __init__(self, bot):
@@ -2732,7 +2933,7 @@ class Points(commands.Cog):
         permissions_preset="moderator",
     )
 
-    @case_group.command(name="history", description="View all past warnings/points for a user.")
+    @case_group.command(name="history", description="View all past cases for a user.")
     async def case_history(self, interaction: discord.Interaction, user: discord.User):
         await interaction.response.defer()
         await self.guild_setup(interaction)
@@ -2757,7 +2958,7 @@ class Points(commands.Cog):
         await interaction.response.send_message(view=view)
         view.message = await interaction.original_response()
 
-    @case_group.command(name="view", description="View a specific case by ID.")
+    @case_group.command(name="view", description="View a specific moderation case by ID.")
     async def case_view(self, interaction: discord.Interaction, case_id: int):
         await self.guild_setup(interaction)
         case = await self.get_infraction(interaction.guild.id, case_id)
@@ -2774,7 +2975,7 @@ class Points(commands.Cog):
         await interaction.response.send_message(view=view)
         view.message = await interaction.original_response()
 
-    @case_group.command(name="all", description="Browse all members with active warnings/points.")
+    @case_group.command(name="users", description="Shows a list of all users who have a moderation case.")
     async def case_all(self, interaction: discord.Interaction):
         await interaction.response.defer()
         await self.guild_setup(interaction)
@@ -2787,7 +2988,20 @@ class Points(commands.Cog):
         await interaction.edit_original_response(view=view)
         view.message = await interaction.original_response()
 
-    @case_group.command(name="delete", description="Delete a case and adjust the user's warnings/points.")
+    @case_group.command(name="all", description="Show a list of every moderation case recorded.")
+    async def case_all_list(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        await self.guild_setup(interaction)
+        settings = self.settings_cache.get(interaction.guild.id, {})
+        is_simple = settings.get("simple_mode", 0) == 1
+        term = "warning" if is_simple else "point"
+
+        view = AllCasesPage(interaction.user, self, interaction.guild, term)
+        await view.initialize()
+        await interaction.edit_original_response(view=view)
+        view.message = await interaction.original_response()
+
+    @case_group.command(name="delete", description="Delete a moderation case and adjust the user's warnings/points.")
     async def case_delete(self, interaction: discord.Interaction, case_id: int):
         await self.guild_setup(interaction)
         case = await self.get_infraction(interaction.guild.id, case_id)
