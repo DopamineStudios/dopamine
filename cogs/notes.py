@@ -17,7 +17,7 @@ note_group = app_commands.Group(name="note", description="Note management comman
 
 class UndoButtonView(PrivateView):
     def __init__(self, user, cog: Notes, user_id: int, action_type: str, data: dict, interaction: discord.Interaction):
-        super().__init__(user, timeout=30.0)
+        super().__init__(user, timeout=10.0)
         self.cog = cog
         self.user_id = user_id
         self.action_type = action_type
@@ -30,7 +30,7 @@ class UndoButtonView(PrivateView):
         except Exception:
             pass
 
-    @discord.ui.button(label="Undo", style=discord.ButtonStyle.danger, custom_id="undo_action")
+    @discord.ui.button(label="Undo", style=discord.ButtonStyle.secondary, custom_id="undo_action")
     async def undo_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         button.disabled = True
@@ -203,6 +203,7 @@ class Notes(commands.Cog):
             super().__init__()
             self.cog = cog
             self.old_name = old_name
+            self.old_content = old_content
 
             self.note_name = discord.ui.TextInput(
                 label="Note Name",
@@ -265,7 +266,7 @@ class Notes(commands.Cog):
                     data={"old_name": self.old_name, "new_name": new_name, "old_content": self.old_content},
                     interaction=interaction
                 )
-                await interaction.response.send_message(embed=embed, view=undo_view, Ephemeral=True)
+                await interaction.response.send_message(embed=embed, view=undo_view, ephemeral=True)
 
             except Exception as e:
                 await interaction.response.send_message(f"Error updating note: {e}", ephemeral=True)

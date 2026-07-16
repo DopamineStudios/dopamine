@@ -716,14 +716,16 @@ class TemplateHomepage(PrivateLayoutView):
         self.add_item(container)
 
     async def browse_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(guild_id=interaction.guild.id, mode="browse")
         view = BrowsePage(self.cog, self.user, templates, interaction.guild.id, is_th=True)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
     async def mystuff_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(user_id=self.user.id, mode="mine")
         view = MystuffPage(self.cog, self.user, templates)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class MystuffPage(PrivateLayoutView):
@@ -1202,14 +1204,16 @@ class CreatewithtemplatePage(PrivateLayoutView):
             SearchModal("id_direct", self))
 
     async def browse_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(guild_id=interaction.guild.id, mode="browse")
         view = BrowsePage(self.cog, self.user, templates, interaction.guild.id)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
     async def my_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         templates = await self.cog.fetch_templates(user_id=self.user.id, mode="mine")
         view = MystuffUse(self.cog, self.user, templates)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
     async def back_callback(self, interaction: discord.Interaction):
         view = CreateChoose(self.cog, self.user)
@@ -1294,7 +1298,7 @@ class MystuffUse(PrivateLayoutView):
         await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
 
     async def back_callback(self, interaction: discord.Interaction):
-        view = CreateChoose(self.cog, self.user)
+        view = CreatewithtemplatePage(self.cog, self.user)
         await interaction.response.edit_message(view=view)
 
 
@@ -1634,6 +1638,7 @@ class Giveaways(commands.Cog):
 
     async def init_db(self):
         async with self.acquire_db() as db:
+            await self._migrate_winner_role_to_text(db)
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS giveaways (
                     guild_id INTEGER,
@@ -1648,7 +1653,7 @@ class Giveaways(commands.Cog):
                     req_behaviour INTEGER,
                     blacklisted_roles TEXT,
                     extra_entry_roles TEXT,
-                    winner_role_id INTEGER,
+                    winner_role_id TEXT,
                     image_url TEXT,
                     thumbnail_url TEXT,
                     color TEXT,
@@ -1706,6 +1711,108 @@ class Giveaways(commands.Cog):
             ''')
 
             await db.commit()
+
+            await self._run_migrations(db)
+
+    async def _run_migrations(self, db: aiosqlite.Connection):
+        """
+        Automatically fixes data type mismatches in the database.
+        """
+        async with db.execute("SELECT giveaway_id, guild_id, winners_count FROM giveaways") as cursor:
+            async for row in cursor:
+                g_id, guild_id, w_count = row
+
+
+                if isinstance(w_count, str):
+                    try:
+                        new_count = int(w_count)
+                    except ValueError:
+                        # If it's "123,456" (the role ID bug), we can't know the real count.
+                        # Default to 1 to prevent the bot from crashing.
+                        new_count = 1
+
+                    await db.execute(
+                        "UPDATE giveaways SET winners_count = ? WHERE giveaway_id = ? AND guild_id = ?",
+                        (new_count, g_id, guild_id)
+                    )
+                    print(
+                        f"[Migration] Fixed winners_count for giveaway {g_id} in guild {guild_id}: '{w_count}' -> {new_count}")
+
+        async with db.execute("SELECT template_id, winners FROM templates") as cursor:
+            async for row in cursor:
+                t_id, w_count = row
+                if isinstance(w_count, str):
+                    try:
+                        new_count = int(w_count)
+                    except ValueError:
+                        new_count = 1
+
+                    await db.execute(
+                        "UPDATE templates SET winners = ? WHERE template_id = ?",
+                        (new_count, t_id)
+                    )
+                    print(f"[Migration] Fixed template winners for {t_id}: '{w_count}' -> {new_count}")
+
+        await db.commit()
+
+    async def _migrate_winner_role_to_text(self, db: aiosqlite.Connection):
+        """
+        Migrates the 'winner_role_id' column from INTEGER to TEXT to support
+        multiple role IDs.
+        """
+        async with db.execute("PRAGMA table_info(giveaways)") as cursor:
+            columns = await cursor.fetchall()
+            # column[1] is name, column[2] is type
+            winner_role_col = next((c for c in columns if c[1] == "winner_role_id"), None)
+
+            if not winner_role_col or winner_role_col[2].upper() != "TEXT":
+                return
+
+        self.bot.logger.info("[Migration] Detected winner_role_id is not TEXT. Starting migration...")
+
+        await db.execute('''
+            CREATE TABLE giveaways_new (
+                guild_id INTEGER,
+                giveaway_id INTEGER,
+                channel_id INTEGER,
+                message_id INTEGER,
+                prize TEXT,
+                winners_count INTEGER,
+                end_time INTEGER,
+                host_id INTEGER,
+                required_roles TEXT,
+                req_behaviour INTEGER,
+                blacklisted_roles TEXT,
+                extra_entry_roles TEXT,
+                winner_role_id TEXT,  -- This is now TEXT
+                image_url TEXT,
+                thumbnail_url TEXT,
+                color TEXT,
+                ended INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, giveaway_id)
+            )
+        ''')
+
+        await db.execute('''
+            INSERT INTO giveaways_new (
+                guild_id, giveaway_id, channel_id, message_id, prize, 
+                winners_count, end_time, host_id, required_roles, 
+                req_behaviour, blacklisted_roles, extra_entry_roles, 
+                winner_role_id, image_url, thumbnail_url, color, ended
+            )
+            SELECT 
+                guild_id, giveaway_id, channel_id, message_id, prize, 
+                winners_count, end_time, host_id, required_roles, 
+                req_behaviour, blacklisted_roles, extra_entry_roles, 
+                winner_role_id, image_url, thumbnail_url, color, ended
+            FROM giveaways
+        ''')
+
+        await db.execute("DROP TABLE giveaways")
+        await db.execute("ALTER TABLE giveaways_new RENAME TO giveaways")
+
+        await db.commit()
+        print("[Migration] winner_role_id successfully migrated to TEXT.")
 
     async def populate_caches(self):
         self.giveaway_cache.clear()
@@ -1960,14 +2067,14 @@ class Giveaways(commands.Cog):
             "channel_id": draft.channel_id,
             "message_id": message_id,
             "prize": draft.prize,
-            "winners_count": winner_roles,
+            "winners_count": draft.winners,
             "end_time": end_time,
             "host_id": draft.host_id,
             "required_roles": req_roles,
             "req_behaviour": draft.required_behaviour,
             "blacklisted_roles": black_roles,
             "extra_entry_roles": extra_roles,
-            "winner_role_id": draft.winner_role,
+            "winner_role_id": winner_roles,
             "image_url": draft.image,
             "thumbnail_url": draft.thumbnail,
             "color": draft.color,
@@ -2023,7 +2130,7 @@ class Giveaways(commands.Cog):
             "creator_id": interaction.user.id,
             "creation_guild_id": interaction.guild.id,
             "prize": draft.prize,
-            "winners": winner_roles,
+            "winners": draft.winners,
             "duration": draft.duration,
             "channel_id": draft.channel_id,
             "host_id": draft.host_id,
@@ -2031,7 +2138,7 @@ class Giveaways(commands.Cog):
             "req_behaviour": draft.required_behaviour,
             "blacklisted_roles": black_roles,
             "extra_entries": extra_roles,
-            "winner_role_id": draft.winner_role,
+            "winner_role_id": winner_roles,
             "image": draft.image,
             "thumbnail": draft.thumbnail,
             "color": draft.color

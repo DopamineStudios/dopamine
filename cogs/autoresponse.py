@@ -275,7 +275,7 @@ class ManageAutoresponsePage(PrivateLayoutView):
 
             nav_row = discord.ui.ActionRow()
             left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
-            goto_btn = discord.ui.Button(label=f"Page {self.page}", style=discord.ButtonStyle.secondary)
+            goto_btn = discord.ui.Button(label=f"Go To Page", style=discord.ButtonStyle.secondary)
             right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= total_pages))
 
             async def prev_page(interaction: discord.Interaction):
@@ -747,8 +747,10 @@ class FinalStep(PrivateLayoutView):
 
         async def save_and_start(interaction: discord.Interaction):
             record = await self.cog.create_autoresponse_from_draft(self.guild_id, interaction.user.id, self.draft)
-            await interaction.response.send_message(
-                content=f"Autoresponse for trigger `{record.trigger}` saved and enabled successfully!", view=None, ephemeral=True
+            await interaction.response.defer()
+            await interaction.delete_original_response()
+            await interaction.followup.send(
+                content=f"Autoresponse for trigger `{record.trigger}` saved and enabled successfully!", ephemeral=True
             )
 
         case_btn.callback = toggle_case

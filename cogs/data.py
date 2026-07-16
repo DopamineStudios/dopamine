@@ -795,9 +795,9 @@ class Data(commands.Cog):
 
     @beacon_commands.command(name="di", description=".", permissions_preset="bot_owner")
     async def di_cmd(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         await self.refresh_insights_cache()
-        await interaction.edit_original_response(view=InsightsDashboard(self, interaction.user), ephemeral=True)
+        await interaction.edit_original_response(view=InsightsDashboard(self, interaction.user))
 
 
 async def setup(bot: commands.Bot):

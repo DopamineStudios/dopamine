@@ -1,10 +1,11 @@
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple, Set, Any, AsyncGenerator
 
 import aiosqlite
 import discord
+from aiosqlite import Connection
 from discord import app_commands
 from discord.ext import commands
 
@@ -12,6 +13,7 @@ from config import AFKDB_PATH
 from beacon import ViewPaginator, PrivateView
 from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
+import datetime
 
 AFK_BUFFER_SECONDS = 30
 AFK_MAX_SECONDS = 72 * 60 * 60
@@ -41,60 +43,195 @@ class MissedPing:
     timestamp: int
 
 
+class GoToPageModal(discord.ui.Modal, title="Go to Page"):
+    page_input = discord.ui.TextInput(
+        label="Enter page number",
+        placeholder="e.g. 2",
+        min_length=1,
+        max_length=5
+    )
+
+    def __init__(self, paginator: "MissedPingsPaginator"):
+        super().__init__()
+        self.paginator = paginator
+        self.page_input.label = f"Enter page number (1-{paginator.total_pages})"
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            page = int(self.page_input.value)
+            if 1 <= page <= self.paginator.total_pages:
+                self.paginator.current_page = page
+                await self.paginator.update_message(interaction)
+            else:
+                await interaction.response.send_message(
+                    f"Invalid page number. Please enter a value between 1 and {self.paginator.total_pages}.",
+                    ephemeral=True
+                )
+        except ValueError:
+            await interaction.response.send_message(
+                "Please enter a valid whole number for the page number.",
+                ephemeral=True
+            )
+
+
+class MissedPingsPaginator(discord.ui.View):
+    def __init__(self, interaction: discord.Interaction, entries: list[MissedPing], cog: "AFK"):
+        super().__init__(timeout=180)
+        self.interaction = interaction
+        self.entries = entries
+        self.cog = cog
+        self.current_page = 1
+        self.per_page = 5
+        self.total_pages = (len(entries) + self.per_page - 1) // self.per_page
+        self.message: discord.Message | None = None
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_page.disabled = self.current_page == 1
+        self.go_to_page.disabled = self.total_pages == 1
+        self.go_to_page.label = f"Page {self.current_page} of {self.total_pages}"
+        self.next_page.disabled = self.current_page == self.total_pages
+
+    async def get_page_embeds(self) -> list[discord.Embed]:
+        start = (self.current_page - 1) * self.per_page
+        end = start + self.per_page
+        page_entries = self.entries[start:end]
+        embeds = []
+
+        for entry in page_entries:
+            guild = self.interaction.client.get_guild(entry.guild_id) if entry.guild_id else None
+            member = guild.get_member(entry.author_id) if guild else None
+            user = member or self.interaction.client.get_user(entry.author_id)
+            if not user:
+                try:
+                    user = await self.interaction.client.fetch_user(entry.author_id)
+                except discord.HTTPException:
+                    user = None
+
+            display_name = user.display_name if user else f"User {entry.author_id}"
+            avatar_url = user.display_avatar.url if user else None
+
+            embed = discord.Embed(colour=discord.Colour(0x944ae8))
+            embed.set_author(name=display_name, icon_url=avatar_url)
+
+            jump_link = f"[Click here to Jump](https://discord.com/channels/{entry.guild_id or '@me'}/{entry.channel_id or 0}/{entry.message_id or 0})"
+            content = entry.content
+            if len(content) > 1000:
+                content = content[:1000] + "..."
+
+            embed.description = f"{jump_link}\n\n{content}"
+            embed.set_footer(text=f"in {guild.name if guild else 'Unknown Server'}")
+            embed.timestamp = datetime.datetime.fromtimestamp(entry.timestamp, tz=datetime.timezone.utc).replace(tzinfo=None)
+            embeds.append(embed)
+
+        return embeds
+
+    async def send_initial(self) -> bool:
+        embeds = await self.get_page_embeds()
+        content = f"# {len(self.entries)} Missed Pings"
+        try:
+            self.message = await self.interaction.user.send(content=content, embeds=embeds, view=self)
+            return True
+        except discord.Forbidden:
+            return False
+
+    async def update_message(self, interaction: discord.Interaction):
+        self.update_buttons()
+        embeds = await self.get_page_embeds()
+        content = f"# {len(self.entries)} Missed Pings"
+        await interaction.response.edit_message(content=content, embeds=embeds, view=self)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 1:
+            self.current_page -= 1
+            await self.update_message(interaction)
+
+    @discord.ui.button(style=discord.ButtonStyle.secondary)
+    async def go_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GoToPageModal(self))
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            await self.update_message(interaction)
+
+
 class ViewMissedPings(PrivateView):
-    def __init__(self, cog: "AFK", user_id: int, user: discord.User):
-        super().__init__(user, timeout=None)
+    def __init__(self, cog: "AFK", user_id: int, user: discord.User | discord.Member,
+                 string_for_after_missed_pings_clear: str):
+        super().__init__(user, timeout=120)
         self.cog = cog
         self.user_id = user_id
+        self.message = None
+        self.string_for_after_missed_pings_clear = string_for_after_missed_pings_clear
 
     @discord.ui.button(label="View Missed Pings", style=discord.ButtonStyle.primary)
     async def view_missed_pings(self, interaction: discord.Interaction, button: discord.ui.Button):
-
         entries = self.cog.missed_pings_cache.get(self.user_id, [])
 
         if not entries:
             return await interaction.response.send_message("You have no missed pings.", ephemeral=True)
 
-        lines: List[str] = []
-        for idx, entry in enumerate(entries, start=1):
-            guild = interaction.client.get_guild(entry.guild_id) if entry.guild_id else None
-            member = guild.get_member(entry.author_id) if guild else None
-            user = member or interaction.client.get_user(entry.author_id) or await interaction.client.fetch_user(
-                entry.author_id)
-            display_name = user.mention or (user.name if user else f"User {entry.author_id}")
-            msg_link = ""
-            if entry.guild_id and entry.channel_id and entry.message_id:
-                msg_link = f" [[Jump]](<https://discord.com/channels/{entry.guild_id}/{entry.channel_id}/{entry.message_id}>)"
+        paginator = MissedPingsPaginator(interaction, entries, self.cog)
+        sent = await paginator.send_initial()
 
-            lines.append(
-                f'{idx}. {display_name} in **{guild.name}**'
-                f'(<t:{entry.timestamp}:d> <t:{entry.timestamp}:t>): '
-                f'"{entry.content}"{msg_link}\n\n'
-            )
-
-        paginator = ViewPaginator(
-            title=f"{len(entries)} Missed Pings",
-            data=lines,
-            per_page=5,
-            color=discord.Color(0x944ae8),
-        )
-        try:
-            message = await interaction.user.send(
-                embed=paginator.format_embed(),
-                view=paginator
-            )
-            link = message.jump_url
-            sent = True
-        except discord.Forbidden:
+        if sent:
+            if not paginator.message is None:
+                await interaction.response.send_message(
+                    f"I sent the Missed Pings to your DMs! [Click here to Jump]({paginator.message.jump_url}).", ephemeral=True)
+            if not self.message is None:
+                await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
+            await self.cog.clear_missed_pings(self.user_id)
+        else:
             await interaction.response.send_message(
                 """I can't DM you the Missed Pings! Please first DM me "hi" so that Discord lets me DM you.""",
                 ephemeral=True)
-            sent = False
 
-        if sent:
-            await interaction.response.send_message(
-                f"I sent the Missed Pings to your DMs! [Click here to Jump]({link}).", ephemeral=True)
-            await self.cog.clear_missed_pings(self.user_id)
+    async def on_timeout(self) -> None:
+        if self.message:
+            try:
+                await self.message.edit(content=self.string_for_after_missed_pings_clear, view=None)
+            except (discord.NotFound, discord.HTTPException):
+                pass
+        await self.cog.clear_missed_pings(self.user_id)
+        self.stop()
+
+
+class ViewNotifyOnReturn(discord.ui.View):
+    """View attached to the AFK notice allowing users to be notified when the AFK target returns."""
+
+    def __init__(self, cog: "AFK", afk_user_id: int):
+        super().__init__(timeout=259200)
+        self.cog = cog
+        self.afk_user_id = afk_user_id
+        self.message = None
+
+    @discord.ui.button(label="DM me upon their grand return", style=discord.ButtonStyle.secondary,
+                       custom_id="afk_notify_on_return")
+    async def notify_me(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id == self.afk_user_id:
+            return await interaction.response.send_message("Don't you think this is a bit too narcissistic? You cannot register to be notified about your own grand return.",
+                                                           ephemeral=True)
+
+        if self.afk_user_id not in self.cog.afk_users:
+            return await interaction.response.send_message("This user is no longer AFK.", ephemeral=True)
+
+        success = await self.cog.add_notification_request(self.afk_user_id, interaction.user.id)
+        if success:
+            await interaction.response.send_message("Got it! You will now be DMed upon their grand return.", ephemeral=True)
+        else:
+            success = await self.cog.remove_notification_request(self.afk_user_id, interaction.user.id)
+            if success:
+                await interaction.response.send_message("You will no longer be notified upon their grand return. Sad.",
+                                                        ephemeral=True)
+            else:
+                await interaction.response.send_message("sum ting wong", ephemeral=True)
+    async def on_timeout(self) -> None:
+        if self.message:
+            await self.message.edit(view=None)
+        self.stop()
 
 
 class AFK(commands.Cog):
@@ -103,6 +240,7 @@ class AFK(commands.Cog):
         self.db_pool: Optional[asyncio.Queue[aiosqlite.Connection]] = None
         self.afk_users: Dict[int, AFKState] = {}
         self.missed_pings_cache: Dict[int, List[MissedPing]] = {}
+        self.notification_cache: Dict[int, Set[int]] = {}
 
     async def cog_load(self):
         await self.init_pools()
@@ -119,7 +257,7 @@ class AFK(commands.Cog):
                     break
             self.db_pool = None
 
-    async def create_pooled_connection(self, path: str) -> aiosqlite.Connection:
+    async def create_pooled_connection(self, path: str) -> Connection | None:
         max_retries = 5
         for attempt in range(max_retries):
             try:
@@ -145,10 +283,11 @@ class AFK(commands.Cog):
             self.db_pool = asyncio.Queue(maxsize=pool_size)
             for _ in range(pool_size):
                 conn = await self.create_pooled_connection(AFKDB_PATH)
-                await self.db_pool.put(conn)
+                if not conn is None:
+                    await self.db_pool.put(conn)
 
     @asynccontextmanager
-    async def acquire_db(self) -> aiosqlite.Connection:
+    async def acquire_db(self) -> AsyncGenerator[Connection, Any]:
         assert self.db_pool is not None
         conn = await self.db_pool.get()
         try:
@@ -188,6 +327,15 @@ class AFK(commands.Cog):
                 """
             )
             await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS return_notifications (
+                    afk_user_id INTEGER NOT NULL,
+                    observer_id INTEGER NOT NULL,
+                    PRIMARY KEY (afk_user_id, observer_id)
+                )
+                """
+            )
+            await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_missed_pings_user_id ON missed_pings (user_id, timestamp)"
             )
             await db.commit()
@@ -195,6 +343,7 @@ class AFK(commands.Cog):
     async def populate_caches(self):
         self.afk_users.clear()
         self.missed_pings_cache.clear()
+        self.notification_cache.clear()
 
         now = int(discord.utils.utcnow().timestamp())
 
@@ -221,6 +370,7 @@ class AFK(commands.Cog):
 
                     if now - started_at >= AFK_MAX_SECONDS:
                         await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
+                        await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ?", (user_id,))
                         continue
 
                     state = AFKState(
@@ -266,6 +416,42 @@ class AFK(commands.Cog):
                         timestamp=timestamp,
                     )
                     self.missed_pings_cache.setdefault(user_id, []).append(entry)
+
+            async with db.execute("SELECT afk_user_id, observer_id FROM return_notifications") as cursor:
+                rows = await cursor.fetchall()
+                for afk_uid, obs_id in rows:
+                    self.notification_cache.setdefault(afk_uid, set()).add(obs_id)
+
+    async def add_notification_request(self, afk_user_id: int, observer_id: int) -> bool:
+        observers = self.notification_cache.setdefault(afk_user_id, set())
+        if observer_id in observers:
+            return False
+
+        observers.add(observer_id)
+        async with self.acquire_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO return_notifications (afk_user_id, observer_id) VALUES (?, ?)",
+                (afk_user_id, observer_id)
+            )
+            await db.commit()
+        return True
+
+    async def remove_notification_request(self, afk_user_id: int, observer_id: int) -> bool:
+        observers = self.notification_cache.get(afk_user_id)
+        if not observers or observer_id not in observers:
+            return False
+
+        observers.discard(observer_id)
+        if not observers:
+            self.notification_cache.pop(afk_user_id, None)
+
+        async with self.acquire_db() as db:
+            await db.execute(
+                "DELETE FROM return_notifications WHERE afk_user_id = ? AND observer_id = ?",
+                (afk_user_id, observer_id)
+            )
+            await db.commit()
+        return True
 
     async def set_afk(
             self,
@@ -345,8 +531,22 @@ class AFK(commands.Cog):
                     except (discord.Forbidden, discord.HTTPException):
                         pass
 
+        observers = self.notification_cache.pop(user_id, set())
+        if observers:
+            afk_user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            afk_name = afk_user.mention if afk_user else f"User `{user_id}`"
+
+            for obs_id in observers:
+                obs_user = self.bot.get_user(obs_id) or await self.bot.fetch_user(obs_id)
+                if obs_user:
+                    try:
+                        await obs_user.send(f"{afk_name} has now made their grand return from being AFK! You should probably go talk to them or something.\n-# To not receive this in the future, don't click the big black button to be notified next time, duh.")
+                    except discord.Forbidden:
+                        pass
+
         async with self.acquire_db() as db:
             await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
+            await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ?", (user_id,))
             await db.commit()
 
     async def clear_missed_pings(self, user_id: int):
@@ -355,7 +555,7 @@ class AFK(commands.Cog):
             await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
             await db.commit()
 
-    def _format_afk_notice(self, member: discord.Member, state: AFKState) -> str:
+    def _format_afk_notice(self, member: discord.Member | discord.User, state: AFKState) -> str:
         now = int(discord.utils.utcnow().timestamp())
         elapsed = max(0, now - state.started_at)
 
@@ -372,7 +572,7 @@ class AFK(commands.Cog):
             return f"{member.display_name} is AFK: {state.status} - {ago}"
         return f"{member.display_name} is AFK - {ago}"
 
-    def _format_welcome_back(self, state: AFKState, missed_count: int) -> str:
+    def _format_welcome_back(self, state: AFKState, missed_count: int) -> tuple[str, str]:
         now = int(discord.utils.utcnow().timestamp())
         elapsed = max(0, now - state.started_at)
 
@@ -390,10 +590,11 @@ class AFK(commands.Cog):
             else:
                 base = f"Welcome back! You were AFK for **{hours}** hours!"
 
+        string_for_after_missed_pings_clear = base
         if missed_count > 0 and state.save_missed_pings:
             base += f"\nYou have **{missed_count}** missed pings!"
 
-        return base
+        return base, string_for_after_missed_pings_clear
 
     def _is_afk_active_in_context(self, state: AFKState, guild: Optional[discord.Guild]) -> bool:
         now = int(discord.utils.utcnow().timestamp())
@@ -478,11 +679,17 @@ class AFK(commands.Cog):
 
             if now >= state.buffer_until:
                 missed = self.missed_pings_cache.get(user_id, [])
-                content = self._format_welcome_back(state, len(missed))
-                view = ViewMissedPings(self, user_id, message.author) if missed and state.save_missed_pings else None
+                content, string_for_after_missed_pings_clear = self._format_welcome_back(state, len(missed))
+                view = ViewMissedPings(self, user_id, message.author,
+                                       string_for_after_missed_pings_clear) if missed and state.save_missed_pings else None
 
                 try:
-                    await message.reply(content, view=view, mention_author=False)
+
+                    if view:
+                        msg = await message.reply(content, view=view, mention_author=False)
+                        view.message = msg
+                    else:
+                        await message.reply(content, mention_author=False)
                 except (discord.Forbidden, discord.HTTPException):
                     pass
 
@@ -519,7 +726,9 @@ class AFK(commands.Cog):
 
             notice = self._format_afk_notice(mentioned, state)
             try:
-                await message.channel.send(notice)
+                notify_view = ViewNotifyOnReturn(self, mentioned.id)
+                msg = await message.channel.send(notice, view=notify_view)
+                notify_view.message = msg
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
@@ -532,7 +741,7 @@ class AFK(commands.Cog):
                     if not self._is_afk_active_in_context(state, message.guild):
                         continue
 
-                    member = message.guild.get_member(uid)
+                    member = message.guild.get_member(uid) or await message.guild.fetch_member(uid)
                     if not member or role not in member.roles:
                         continue
 
@@ -549,7 +758,9 @@ class AFK(commands.Cog):
                     if len(role.members) <= 3:
                         notice = self._format_afk_notice(member, state)
                         try:
-                            await message.channel.send(notice)
+                            notify_view = ViewNotifyOnReturn(self, member.id)
+                            msg = await message.channel.send(notice, view=notify_view)
+                            notify_view.message = msg
                         except (discord.Forbidden, discord.HTTPException):
                             pass
 
@@ -560,7 +771,7 @@ class AFK(commands.Cog):
         for user_id, entries in self.missed_pings_cache.items():
             for entry in entries:
                 if entry.message_id == message_id:
-                    entry.content = "*[This message was deleted]*"
+                    entry.content = "*This message was deleted*"
 
         async with self.acquire_db() as db:
             await db.execute(
@@ -601,7 +812,8 @@ class AFK(commands.Cog):
             )
             await db.commit()
             mp_id = cursor.lastrowid
-
+        if mp_id is None:
+            return
         entry = MissedPing(
             id=mp_id,
             user_id=user_id,
@@ -648,7 +860,8 @@ class AFK(commands.Cog):
     async def data_export_guild(self, guild_id: int) -> DataExportChunk:
         return DataExportChunk(feature_id="afk")
 
-    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None,
+                               feature_id: str | None) -> DataDeleteResult:
         if feature_id and feature_id != "afk":
             return DataDeleteResult(feature_id="afk")
         rows_affected = 0
@@ -657,9 +870,15 @@ class AFK(commands.Cog):
             rows_affected += cur.rowcount
             cur = await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
             rows_affected += cur.rowcount
+            cur = await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ? OR observer_id = ?",
+                                   (user_id, user_id))
+            rows_affected += cur.rowcount
             await db.commit()
         self.afk_users.pop(user_id, None)
         self.missed_pings_cache.pop(user_id, None)
+        self.notification_cache.pop(user_id, None)
+        for uid in list(self.notification_cache.keys()):
+            self.notification_cache[uid].discard(user_id)
         return DataDeleteResult(feature_id="afk", deleted=True, rows_affected=rows_affected)
 
     async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:

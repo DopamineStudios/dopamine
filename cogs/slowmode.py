@@ -1,4 +1,5 @@
 import discord
+from discord.app_commands import Choice
 from discord.ext import commands, tasks
 from discord import app_commands
 import aiosqlite
@@ -211,12 +212,12 @@ class ScheduledSlowmode(commands.Cog):
             return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
-    async def timezone_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
-        app_commands.Choice[str]]:
+    async def timezone_autocomplete(self, interaction: discord.Interaction, current: str) -> list[
+        Choice[str | int | float]]:
         return [app_commands.Choice(name=tz, value=tz) for tz in COMMON_TIMEZONES if current.lower() in tz.lower()][:25]
 
-    async def interval_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
-        app_commands.Choice[int]]:
+    async def interval_autocomplete(self, interaction: discord.Interaction, current: str) -> list[
+        Choice[str | int | float]]:
         return [app_commands.Choice(name=name, value=sec) for name, sec in SLOWMODE_INTERVALS.items() if
                 current.lower() in name.lower()][:25]
 
@@ -236,7 +237,7 @@ class ScheduledSlowmode(commands.Cog):
     @app_commands.describe(channel="The channel to configure slowmode for",
                            interval="The slowmode delay interval (or Disable)")
     @app_commands.autocomplete(interval=interval_autocomplete_with_disable)
-    @preconditions.has_permissions(manage_slowmode=True)
+    @preconditions.has_permissions(manage_channels=True)
     async def configure_slowmode(self, interaction: discord.Interaction, channel: discord.TextChannel, interval: int):
         try:
             await channel.edit(slowmode_delay=interval)
@@ -261,7 +262,7 @@ class ScheduledSlowmode(commands.Cog):
                            timezone="Your timezone region", start_time="Start time (e.g., 14:00 or 02:00 PM)",
                            end_time="End time (e.g., 18:00 or 06:00 PM)")
     @app_commands.autocomplete(timezone=timezone_autocomplete, interval=interval_autocomplete)
-    @preconditions.has_permissions(manage_slowmode=True)
+    @preconditions.has_permissions(manage_channels=True)
     async def schedule_start(self, interaction: discord.Interaction, channel: discord.TextChannel, interval: int,
                              timezone: str, start_time: str, end_time: str):
         if not await self.check_vote_access(interaction.user.id):
@@ -319,7 +320,7 @@ class ScheduledSlowmode(commands.Cog):
 
     @schedule_group.command(name="delete", description="Delete all slowmode schedules for a channel")
     @app_commands.describe(channel="The channel to clear schedules for")
-    @preconditions.has_permissions(manage_slowmode=True)
+    @preconditions.has_permissions(manage_channels=True)
     async def schedule_delete(self, interaction: discord.Interaction, channel: discord.TextChannel):
         if channel.id not in self._schedule_cache or not self._schedule_cache[channel.id]:
             return await interaction.response.send_message(embed=discord.Embed(title="No Schedules",
