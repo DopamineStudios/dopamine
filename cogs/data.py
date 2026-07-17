@@ -186,7 +186,7 @@ class Data(commands.Cog):
 
     def iter_data_cogs(self):
         seen = set()
-        for cog in self.bot.cogs.values():
+        for cog in list(self.bot.cogs.values()):
             if hasattr(cog, "data_features") and id(cog) not in seen:
                 seen.add(id(cog))
                 yield cog
@@ -563,6 +563,8 @@ class Data(commands.Cog):
             pass
 
     async def _monitor_guild(self, guild: discord.Guild):
+        if not self.bot.is_ready():
+            return
         for cog in self.iter_data_cogs():
             if cog is self or not hasattr(cog, "data_monitor_guild"):
                 continue
