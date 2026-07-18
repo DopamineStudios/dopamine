@@ -1794,11 +1794,6 @@ class AllCasesPage(PrivateLayoutView):
         sort_dropdown.callback = self.sort_callback
         container.add_item(discord.ui.ActionRow(sort_dropdown))
 
-        container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
-        return_btn.callback = self.return_home
-        container.add_item(discord.ui.ActionRow(return_btn))
-
         self.add_item(container)
 
     def create_details_callback(self, case):
@@ -1841,9 +1836,6 @@ class AllCasesPage(PrivateLayoutView):
         self.total_pages = max(1, (len(self.filtered_entries) - 1) // self.per_page + 1) if self.filtered_entries else 1
         self.build_layout()
         await interaction.response.edit_message(view=self)
-
-    async def return_home(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(view=ModerationDashboard(self.user, self.cog))
 
 class Moderation(commands.Cog):
     def __init__(self, bot):
