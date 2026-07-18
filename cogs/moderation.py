@@ -2312,7 +2312,7 @@ class Moderation(commands.Cog):
                     self.action_cache[guild_id].append(action)
 
             async with db.execute(
-                    "SELECT guild_id, punishment_dm, punishment_log, decay_interval, rejoin_points, simple_mode, msg_report_enabled, msg_report_channel, msg_report_roles, decay_log_enabled FROM settings") as cursor:
+                    "SELECT guild_id, punishment_dm, punishment_log, decay_interval, rejoin_points, simple_mode, msg_report_enabled, msg_report_channel, msg_report_roles, decay_log_enabled, show_medals FROM settings") as cursor:
                 async for row in cursor:
                     self.settings_cache[row[0]] = {
                         "punishment_dm": row[1],
