@@ -806,8 +806,9 @@ class ModerationDashboard(PrivateLayoutView):
             f"* 1 {term}: Warning\n"
             f"* 2 {term}: 1h Timeout\n"
             f"* 3-4 {term}: Incremental Bans (12h to 1 week)\n"
-            f"* 5 {term}: Permanent Ban\n> The system is completely customizable, and you can customize {term.lower()} amounts for each action or disable an action completely.\n\n"
+            f"* 5 {term}: Permanent Ban\n> Dopamine's moderation system is completely customisable. Create new actions with any type of punishment and duration, delete old ones, or update the {term.lower()} amounts for an existing one.\n\n"
             "**Core Features:**\n"
+            f"* **Cases:** Dopamine stores every single moderation punishment as its own case. View, sort, and search through all cases with `/case all`, view a list of all users with infractions using `/case users`, or view an individual user's case history using `/case history`."
             f"* **Decay:** {term} drop by 1 every set frequency (default: two weeks) if no new infractions occur.\n"
             f"* **Rejoin Policy:** Users unbanned via the bot start a set amount to prevent immediate repeat offenses by keeping them on thin ice."
         ))
