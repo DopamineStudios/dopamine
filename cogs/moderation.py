@@ -901,7 +901,7 @@ class SettingsPage(PrivateLayoutView):
 
         container.add_item(
             discord.ui.Section(discord.ui.TextDisplay(
-                """* **Simple Mode:**\n  * **Terminology:** Replaces "point" with "warning" and replaces `/point` command with `/warn` (single strike at a time only)\n  * The following simple five-strike preset is applied:\n    * 1 warning: Verbal warning, no punishment\n    * 2 warnings: 60-minute timeout/mute\n    * 3 warnings: 12-hour ban\n    * 4 warnings: 7-day ban\n    * 5 warnings: Permanent ban\n  * **Best For:** Users seeking a traditional moderation feel while retaining Dopamine’s decay and rejoin policies without the learning curve. (Note: Customization of actions and point/warning thresholds is still available in Simple Mode!)"""),
+                """* **Simple Mode:** The default configuration for Dopamine's moderation system that aims to mirror the experience of traditional moderation bots to make on-boarding easier. This setting is enabled by default.\n  * **Terminology:** Replaces "point" with "warning" and replaces `/point` command with `/warn` ("amount" option becomes optional and defaults to 1)\n  * The following simple five-strike preset is applied (you can still completely customise actions and replace this):\n    * 1 warning: Verbal warning, no punishment\n    * 2 warnings: 60-minute timeout\n    * 3 warnings: 12-hour ban\n    * 4 warnings: 7-day ban\n    * 5 warnings: Permanent ban"""),
                 accessory=simple_btn))
 
         container.add_item(
