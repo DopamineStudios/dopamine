@@ -1570,7 +1570,7 @@ class AllActiveInfractionsPage(PrivateLayoutView):
 
         sort_options = [
             discord.SelectOption(label=f"Most {term}", value=self.SORT_MOST),
-            discord.SelectOption(label="Least {term}", value=self.SORT_LEAST),
+            discord.SelectOption(label=f"Least {term}", value=self.SORT_LEAST),
             discord.SelectOption(label="Most Recent Punishment", value=self.SORT_RECENT),
             discord.SelectOption(label="Oldest Punishment", value=self.SORT_OLDEST),
             discord.SelectOption(label="Alphabetical (A–Z)", value=self.SORT_ALPHA),
