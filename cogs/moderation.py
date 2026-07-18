@@ -1845,7 +1845,7 @@ class AllCasesPage(PrivateLayoutView):
     async def return_home(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=ModerationDashboard(self.user, self.cog))
 
-class Points(commands.Cog):
+class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.user_cache: Dict[str, Dict[str, Any]] = {}
@@ -2037,6 +2037,16 @@ class Points(commands.Cog):
                        WHERE guild_id = ? AND user_id = ?
                        ORDER BY created_at DESC''',
                     (guild_id, user_id)
+            ) as cursor:
+                return [self._row_to_infraction(row) async for row in cursor]
+
+    async def get_all_infractions(self, guild_id: int) -> List[dict]:
+        async with self.acquire_db() as db:
+            async with db.execute(
+                    "SELECT id, guild_id, case_number, user_id, moderator_id, amount, reason, "
+                    "punishment_type, punishment_duration, points_after, created_at "
+                    "FROM infractions WHERE guild_id = ? ORDER BY created_at DESC",
+                    (guild_id,)
             ) as cursor:
                 return [self._row_to_infraction(row) async for row in cursor]
 
@@ -3444,4 +3454,4 @@ class PunishPendingModal(discord.ui.Modal):
 
 
 async def setup(bot):
-    await bot.add_cog(Points(bot))
+    await bot.add_cog(Moderation(bot))
