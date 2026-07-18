@@ -888,6 +888,13 @@ class SettingsPage(PrivateLayoutView):
                                           style=discord.ButtonStyle.secondary if decay_log_on else discord.ButtonStyle.primary)
         decay_log_btn.callback = self.make_toggle_callback("decay_log_enabled", not decay_log_on)
 
+        medals_on = settings.get("show_medals", 1) == 1
+        medals_btn = discord.ui.Button(
+            label=f"{'Disable' if medals_on else 'Enable'} Medals",
+            style=discord.ButtonStyle.secondary if medals_on else discord.ButtonStyle.primary
+        )
+        medals_btn.callback = self.make_toggle_callback("show_medals", not medals_on)
+
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(
             f"* **Decay Frequency:** Edit the frequency at which one {'warning' if simple_on else 'point'} is decayed from a user. Current: **{'Disabled' if decay_val == 0 else f'{decay_val} Days'}**."),
                                               accessory=decay_btn))
@@ -914,6 +921,11 @@ class SettingsPage(PrivateLayoutView):
         container.add_item(
             discord.ui.Section(discord.ui.TextDisplay("* **Punishment DMs:** Sends a DM to the user who is punished."),
                                accessory=dm_btn))
+
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay("* **Medals:** Show or hide medals next to names of users in Active Infractions list (`/case users` command)."),
+            accessory=medals_btn
+        ))
 
         container.add_item(discord.ui.Separator())
         return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
@@ -1477,13 +1489,14 @@ class AllActiveInfractionsPage(PrivateLayoutView):
                 reverse=True,
             )
 
-    def _rank_emoji(self, rank: int) -> str:
-        if rank == 1:
-            return "🥇"
-        if rank == 2:
-            return "🥈"
-        if rank == 3:
-            return "🥉"
+    def _rank_emoji(self, rank: int, show_medals: bool) -> str:
+        if show_medals:
+            if rank == 1:
+                return "🥇"
+            if rank == 2:
+                return "🥈"
+            if rank == 3:
+                return "🥉"
         return f"**#{rank}**"
 
     def build_layout(self):
@@ -1512,13 +1525,17 @@ class AllActiveInfractionsPage(PrivateLayoutView):
         start = (self.page - 1) * self.per_page
         current = self.filtered_entries[start:start + self.per_page]
 
+        settings = self.cog.settings_cache.get(self.guild.id, {})
+        show_medals = settings.get("show_medals", 1) == 1
+
         if not current:
             container.add_item(discord.ui.TextDisplay("*No active infractions found.*"))
         else:
             for idx, entry in enumerate(current, start + 1):
                 uid = entry["user_id"]
                 name = self.display_names.get(uid, "Unknown User")
-                rank_label = self._rank_emoji(idx) if self.current_sort == self.SORT_MOST and not self.search_query else f"**#{idx}**"
+
+                rank_label = self._rank_emoji(idx, show_medals) if self.current_sort == self.SORT_MOST and not self.search_query else f"**#{idx}**"
                 last_p = (
                     f"<t:{entry['last_punishment']}:R>"
                     if entry["last_punishment"]
@@ -1931,7 +1948,8 @@ class Moderation(commands.Cog):
                     msg_report_enabled INTEGER DEFAULT 0,
                     msg_report_channel INTEGER,
                     msg_report_roles TEXT,
-                    decay_log_enabled INTEGER DEFAULT 0
+                    decay_log_enabled INTEGER DEFAULT 0,
+                    show_medals INTEGER DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS infractions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1971,6 +1989,8 @@ class Moderation(commands.Cog):
                 await db.execute("ALTER TABLE settings ADD COLUMN msg_report_roles TEXT")
             if "decay_log_enabled" not in columns:
                 await db.execute("ALTER TABLE settings ADD COLUMN decay_log_enabled INTEGER DEFAULT 0")
+            if "show_medals" not in columns:
+                await db.execute("ALTER TABLE settings ADD COLUMN show_medals INTEGER DEFAULT 1")
 
             async with db.execute("PRAGMA table_info(users)") as cursor:
                 columns = [info[1] for info in await cursor.fetchall()]
@@ -2303,7 +2323,8 @@ class Moderation(commands.Cog):
                         "msg_report_enabled": row[6],
                         "msg_report_channel": row[7],
                         "msg_report_roles": row[8],
-                        "decay_log_enabled": row[9]
+                        "decay_log_enabled": row[9],
+                        "show_medals": row[10]
                     }
 
     async def guild_setup(self, interaction: discord.Interaction):
@@ -2316,7 +2337,7 @@ class Moderation(commands.Cog):
                 "punishment_dm": 1, "punishment_log": 1, "simple_mode": 1,
                 "decay_interval": 14, "rejoin_points": 4,
                 "msg_report_enabled": 0, "msg_report_channel": None, "msg_report_roles": None,
-                "decay_log_enabled": 0
+                "decay_log_enabled": 0, "show_medals": 1
             }
             await self.apply_default_actions(interaction.guild.id)
         return True
