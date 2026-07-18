@@ -521,6 +521,9 @@ class MemberCountTracker(commands.Cog):
 
             last_count = data.get('last_member_count', 0)
 
+            if current_count is None:
+                continue
+                
             if current_count <= last_count:
                 continue
 
