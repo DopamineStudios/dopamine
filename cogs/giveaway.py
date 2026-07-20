@@ -680,7 +680,7 @@ class GiveawayJoinView(discord.ui.View):
             guild=interaction.guild
         )
 
-        await interaction.followup.send(embed=view.get_embed(), view=view, ephemeral=True)
+        await interaction.followup.send(embed=await view.get_embed(), view=view, ephemeral=True)
 
 
 class TemplateHomepage(PrivateLayoutView):
