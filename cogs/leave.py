@@ -56,8 +56,6 @@ class LeaveTextModal(discord.ui.Modal, title="Customise Leave Text"):
 
 
 class LeaveImageModal(discord.ui.Modal, title="Customise Goodbye Card"):
-
-
     def __init__(self, data: dict, callback_func):
         super().__init__()
         self.background_file = discord.ui.FileUpload(
@@ -231,7 +229,19 @@ class LeaveDashboardView(PrivateLayoutView):
             content = f"**TEST:** {raw_msg.format(member=bot_member, server=guild)}"
 
         if self.data.get("show_image", 1):
-            file = await self.cog.generate_leave_card(bot_member, self.data, guild)
+            avatar_bytes = None
+            async with aiohttp.ClientSession() as session:
+                avatar_bytes = await fetch_image(session, bot_member.display_avatar.url)
+
+            loop = asyncio.get_running_loop()
+            file = await loop.run_in_executor(
+                None,
+                self.cog.generate_leave_card,
+                bot_member,
+                self.data,
+                guild,
+                avatar_bytes
+            )
 
         try:
             await channel.send(content=content, file=file)
@@ -377,7 +387,6 @@ class LeaveDashboardView(PrivateLayoutView):
             channel_select.default_values = [
                 discord.SelectDefaultValue(id=channel_id, type=discord.SelectDefaultValueType.channel)
             ]
-
 
         if is_enabled:
             container.add_item(discord.ui.Separator())
@@ -588,7 +597,7 @@ class Leaves(commands.Cog):
                     data = dict(zip(columns, row))
                     self.leave_cache[data["guild_id"]] = data
 
-    async def get_background_image(self, guild_id: int, local_image_path: Optional[str]) -> pyvips.Image:
+    def get_background_image(self, guild_id: int, local_image_path: Optional[str]) -> pyvips.Image:
         if guild_id in self.image_bytes_cache:
             return pyvips.Image.new_from_buffer(self.image_bytes_cache[guild_id], "")
 
@@ -605,7 +614,7 @@ class Leaves(commands.Cog):
             print(f"Error processing Background: {e}")
             return pyvips.Image.new_from_file(LEAVECARD_PATH).thumbnail_image(686, height=291, crop="centre")
 
-    async def generate_leave_card(self, member: discord.User, data: dict, guild: discord.Guild) -> discord.File:
+    def generate_leave_card(self, member: discord.User, data: dict, guild: discord.Guild, avatar_bytes: Optional[bytes]) -> discord.File:
         guild_id = guild.id
         local_path = data.get("local_image_path")
 
@@ -618,13 +627,11 @@ class Leaves(commands.Cog):
         hex_color = data.get("embed_color") or "#FFFFFF"
         rgb = [int(hex_color.lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)]
 
-        base_img = await self.get_background_image(guild_id, local_path)
+        base_img = self.get_background_image(guild_id, local_path)
         if not base_img.hasalpha():
             base_img = base_img.addalpha()
 
         avatar_size = 100
-        async with aiohttp.ClientSession() as session:
-            avatar_bytes = await fetch_image(session, member.display_avatar.url)
 
         if avatar_bytes:
             avatar = pyvips.Image.new_from_buffer(avatar_bytes, "").thumbnail_image(avatar_size, height=avatar_size,
@@ -697,7 +704,19 @@ class Leaves(commands.Cog):
                 msg_content = raw_msg.format(member=user, server=guild)
 
             if data.get("show_image", 1):
-                msg_file = await self.generate_leave_card(user, data, guild)
+                avatar_bytes = None
+                async with aiohttp.ClientSession() as session:
+                    avatar_bytes = await fetch_image(session, user.display_avatar.url)
+
+                loop = asyncio.get_running_loop()
+                msg_file = await loop.run_in_executor(
+                    None,
+                    self.generate_leave_card,
+                    user,
+                    data,
+                    guild,
+                    avatar_bytes
+                )
 
             if msg_content or msg_file:
                 await channel.send(content=msg_content, file=msg_file)

@@ -364,7 +364,18 @@ class WelcomeDashboardView(PrivateLayoutView):
             content = f"**TEST:** {raw_msg.format(member=bot_member, server=guild, position=pos_str)}"
 
         if self.data.get("show_image", 1):
-            file = await self.cog.generate_welcome_card(bot_member, self.data)
+            avatar_bytes = None
+            async with aiohttp.ClientSession() as session:
+                avatar_bytes = await fetch_image(session, bot_member.display_avatar.url)
+
+            loop = asyncio.get_running_loop()
+            file = await loop.run_in_executor(
+                None,
+                self.cog.generate_welcome_card,
+                bot_member,
+                self.data,
+                avatar_bytes
+            )
 
         try:
             await channel.send(content=content, file=file)
@@ -598,7 +609,7 @@ class Welcome(commands.Cog):
                     data = dict(zip(columns, row))
                     self.welcome_cache[data["guild_id"]] = data
 
-    async def get_background_image(self, guild_id: int, local_image_path: Optional[str]) -> pyvips.Image:
+    def get_background_image(self, guild_id: int, local_image_path: Optional[str]) -> pyvips.Image:
         if guild_id in self.image_bytes_cache:
             return pyvips.Image.new_from_buffer(self.image_bytes_cache[guild_id], "")
 
@@ -615,7 +626,7 @@ class Welcome(commands.Cog):
             print(f"Error processing Background: {e}")
             return pyvips.Image.new_from_file(WELCOMECARD_PATH).thumbnail_image(686, height=291, crop="centre")
 
-    async def get_member_count(self, guild: discord.Guild) -> int:
+    def get_member_count(self, guild: discord.Guild) -> int | None:
         if guild.id in self.member_count_cache:
             return self.member_count_cache[guild.id]
 
@@ -623,10 +634,10 @@ class Welcome(commands.Cog):
         self.member_count_cache[guild.id] = count
         return count
 
-    async def generate_welcome_card(self, member: discord.Member, data: dict) -> discord.File:
+    def generate_welcome_card(self, member: discord.Member, data: dict, avatar_bytes: Optional[bytes]) -> discord.File:
         guild_id = member.guild.id
         local_path = data.get("local_image_path")
-        position = await self.get_member_count(member.guild)
+        position = self.get_member_count(member.guild)
         pos_str = get_ordinal(position)
 
         line1_text = (data.get("image_line1") or "Welcome {member.display_name}").format(
@@ -638,13 +649,11 @@ class Welcome(commands.Cog):
         hex_color = data.get("embed_color") or "#FFFFFF"
         rgb = [int(hex_color.lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)]
 
-        base_img = await self.get_background_image(guild_id, local_path)
+        base_img = self.get_background_image(guild_id, local_path)
         if not base_img.hasalpha():
             base_img = base_img.addalpha()
 
         avatar_size = 100
-        async with aiohttp.ClientSession() as session:
-            avatar_bytes = await fetch_image(session, member.display_avatar.url)
 
         if avatar_bytes:
             avatar = pyvips.Image.new_from_buffer(avatar_bytes, "").thumbnail_image(avatar_size, height=avatar_size,
@@ -704,7 +713,7 @@ class Welcome(commands.Cog):
             if member.guild.id in self.member_count_cache:
                 self.member_count_cache[member.guild.id] += 1
 
-            current_pos = await self.get_member_count(member.guild)
+            current_pos = self.get_member_count(member.guild)
             pos_str = get_ordinal(current_pos)
 
             msg_content = None
@@ -719,7 +728,18 @@ class Welcome(commands.Cog):
                 )
 
             if data.get("show_image", 1):
-                msg_file = await self.generate_welcome_card(member, data)
+                avatar_bytes = None
+                async with aiohttp.ClientSession() as session:
+                    avatar_bytes = await fetch_image(session, member.display_avatar.url)
+
+                loop = asyncio.get_running_loop()
+                msg_file = await loop.run_in_executor(
+                    None,
+                    self.generate_welcome_card,
+                    member,
+                    data,
+                    avatar_bytes
+                )
 
             if msg_content or msg_file:
                 await channel.send(content=msg_content, file=msg_file)
