@@ -302,31 +302,26 @@ class ParticipantPaginator(discord.ui.View):
         self.show_tags = False
         self.processed_participants = processed_participants
 
-    def _process_participants(self, participants, extra_roles):
-        data = []
-        for uid in participants:
-            entries = 1
-            member = self.guild.get_member(uid) or self.guild.fetch_member(uid)
-            if member and extra_roles:
-                for role_id in extra_roles:
-                    if any(r.id == role_id for r in member.roles):
-                        entries += 1
-            data.append({'id': uid, 'entries': entries})
-
-        return sorted(data, key=lambda x: (x['entries'], x['id']), reverse=True)
-
-    def get_embed(self):
+    async def get_embed(self):
         start = self.current_page * self.per_page
         end = start + self.per_page
         page_list = self.processed_participants[start:end]
 
         lines = []
         for item in page_list:
-            user = self.bot.get_user(item['id']) or self.bot.fetch_user(item['id'])
+            user_id = item['id']
+            user = self.bot.get_user(user_id) or self.guild.get_member(user_id)
+
+            if not user:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                except Exception:
+                    user = None
+
             if user:
                 name = user.name if self.show_tags else f"<@{user.id}>"
             else:
-                name = f"Unknown({item['id']})"
+                name = f"Unknown({user_id})"
 
             lines.append(f"• **{name}** (**{item['entries']}** entries)")
 
@@ -346,24 +341,24 @@ class ParticipantPaginator(discord.ui.View):
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_page > 0:
             self.current_page -= 1
-            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
     @discord.ui.button(label="Go To Page", style=discord.ButtonStyle.gray)
     async def go_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         total_pages = (len(self.processed_participants) - 1) // self.per_page + 1
-        await interaction.response.send_modal(GoToPageModalPaginator(self.current_page, total_pages, self))
+        await interaction.response.send_modal(GoToPageModal(self, total_pages))
 
     @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.primary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if (self.current_page + 1) * self.per_page < len(self.processed_participants):
             self.current_page += 1
-            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
     @discord.ui.button(label="Show User Tags", style=discord.ButtonStyle.gray)
     async def toggle_tags(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.show_tags = not self.show_tags
         button.label = "Show Usernames" if self.show_tags else "Show User Tags"
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
 
 class BehaviorSelect(discord.ui.Select):
@@ -1727,8 +1722,6 @@ class Giveaways(commands.Cog):
                     try:
                         new_count = int(w_count)
                     except ValueError:
-                        # If it's "123,456" (the role ID bug), we can't know the real count.
-                        # Default to 1 to prevent the bot from crashing.
                         new_count = 1
 
                     await db.execute(
@@ -1762,7 +1755,6 @@ class Giveaways(commands.Cog):
         """
         async with db.execute("PRAGMA table_info(giveaways)") as cursor:
             columns = await cursor.fetchall()
-            # column[1] is name, column[2] is type
             winner_role_col = next((c for c in columns if c[1] == "winner_role_id"), None)
 
             if not winner_role_col or winner_role_col[2].upper() != "TEXT":
