@@ -663,9 +663,21 @@ class Welcome(commands.Cog):
             base_img = base_img.composite2(avatar, 'over', x=343 - (avatar_size // 2), y=102 - (avatar_size // 2))
 
         def draw_centered_text(base, text, size, y_pos, font_name, weight, color_rgb):
+            max_width = 638
+            min_size = 10
+
+            while size > min_size:
+                mask = pyvips.Image.text(
+                    f'<span font_family="{font_name}" weight="{weight}" size="{size * 1024}">{text}</span>'
+                )
+                if mask.width <= max_width:
+                    break
+                size -= 2
+
             mask = pyvips.Image.text(
                 f'<span font_family="{font_name}" weight="{weight}" size="{size * 1024}">{text}</span>'
             )
+
             x_pos = (686 - mask.width) // 2
             white_text = mask.new_from_image(color_rgb).copy(interpretation="srgb")
             text_img = white_text.bandjoin(mask)
