@@ -271,11 +271,10 @@ class ManageAutoresponsePage(PrivateLayoutView):
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(display_text), accessory=edit_btn))
 
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total_pages}"))
 
             nav_row = discord.ui.ActionRow()
             left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
-            goto_btn = discord.ui.Button(label=f"Go To Page", style=discord.ButtonStyle.secondary)
+            goto_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}", style=discord.ButtonStyle.secondary)
             right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= total_pages))
 
             async def prev_page(interaction: discord.Interaction):

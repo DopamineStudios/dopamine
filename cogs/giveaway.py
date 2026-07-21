@@ -328,13 +328,13 @@ class ParticipantPaginator(discord.ui.View):
         mentions = "\n".join(lines) or "No participants yet."
         total_pages = (len(self.processed_participants) - 1) // self.per_page + 1
         total_count = len(self.processed_participants)
-
+        self.go_to_page.label = f"Page {self.current_page + 1} of {total_pages}"
         embed = discord.Embed(
             title=f"<:dopamine:1479037593537613945> Participants for **{self.prize}**",
             description=mentions,
             color=discord.Color(0x944ae8)
         )
-        embed.set_footer(text=f"Total Participants: {total_count} | Page {self.current_page + 1} of {total_pages}")
+        embed.set_footer(text=f"Total Participants: {total_count}")
         return embed
 
     @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.primary)
@@ -343,7 +343,7 @@ class ParticipantPaginator(discord.ui.View):
             self.current_page -= 1
             await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
-    @discord.ui.button(label="Go To Page", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="Page 0 of 0", style=discord.ButtonStyle.gray)
     async def go_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         total_pages = (len(self.processed_participants) - 1) // self.per_page + 1
         await interaction.response.send_modal(GoToPageModal(self, total_pages))
@@ -762,13 +762,12 @@ class MystuffPage(PrivateLayoutView):
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(
                 f"### {t['prize']}\n{desc}"), accessory=edit_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 1)
         left_btn.callback = self.prev_callback
 
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
 
@@ -978,12 +977,11 @@ class BrowsePage(PrivateLayoutView):
 
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=use_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1243,12 +1241,11 @@ class MystuffUse(PrivateLayoutView):
             container.add_item(
                 discord.ui.Section(discord.ui.TextDisplay(f"### {t['prize']}\n{desc}"), accessory=use_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,

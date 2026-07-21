@@ -247,13 +247,12 @@ class ManagePage(PrivateLayoutView):
 
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(display_name), accessory=edit_btn))
 
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total_pages}"))
             container.add_item(discord.ui.Separator())
 
             left_btn = discord.ui.Button(emoji="◀", style=discord.ButtonStyle.primary, disabled=(self.page == 1))
             left_btn.callback = self.prev_page
 
-            go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary, disabled=(total_pages <= 1))
+            go_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}", style=discord.ButtonStyle.secondary, disabled=(total_pages <= 1))
             # pyrefly: ignore [no-matching-overload]
             go_btn.callback = lambda interaction: interaction.response.send_modal(GoToPageModal(self, total_pages))
 

@@ -472,7 +472,6 @@ class ManagePage(PrivateLayoutView):
                 display_text = f"{idx}. **{p_title}** in <#{chan_id}>"
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(display_text), accessory=btn_edit))
 
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total_pages}"))
 
             container.add_item(discord.ui.Separator())
             row = discord.ui.ActionRow()
@@ -481,7 +480,7 @@ class ManagePage(PrivateLayoutView):
             left_btn.callback = self.prev_page
             row.add_item(left_btn)
 
-            go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary, disabled=(total_pages == 1))
+            go_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}", style=discord.ButtonStyle.secondary, disabled=(total_pages == 1))
 
             async def go_to_page_callback(interaction: discord.Interaction):
                 modal = GoToPageModal(self, total_pages)

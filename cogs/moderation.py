@@ -1040,7 +1040,6 @@ class CustomisationPage(PrivateLayoutView):
                 display_text = f"{i}. **{display}**: `{action['points']}` {term.lower()}{'s' if action['points'] != 1 else ''}"
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(display_text), accessory=btn))
 
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total_pages}"))
             container.add_item(discord.ui.Separator())
 
             nav_row = discord.ui.ActionRow()
@@ -1049,7 +1048,7 @@ class CustomisationPage(PrivateLayoutView):
             left_btn.callback = self.prev_page
             nav_row.add_item(left_btn)
 
-            go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary,
+            go_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}", style=discord.ButtonStyle.secondary,
                                        disabled=(total_pages == 1))
             go_btn.callback = self.go_to_page_callback
             nav_row.add_item(go_btn)
@@ -1319,13 +1318,12 @@ class CaseUserHistoryPage(PrivateLayoutView):
                 view_btn.callback = self.create_view_callback(case)
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=view_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         nav_row = discord.ui.ActionRow()
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1552,14 +1550,12 @@ class AllActiveInfractionsPage(PrivateLayoutView):
                 cases_btn.callback = self.create_cases_callback(uid)
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=cases_btn))
 
-        live_status = "ON — auto-refreshing" if self.live else "OFF"
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages} • Live: {live_status}"))
         container.add_item(discord.ui.Separator())
 
         nav_row = discord.ui.ActionRow()
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1765,13 +1761,12 @@ class AllCasesPage(PrivateLayoutView):
                 view_btn.callback = self.create_details_callback(case)
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=view_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         nav_row = discord.ui.ActionRow()
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
         left_btn.callback = self.prev_page
-        go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=(self.total_pages <= 1))
         go_btn.callback = self.go_to_page_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
