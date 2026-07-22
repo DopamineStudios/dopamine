@@ -241,7 +241,7 @@ class Dblc(commands.Cog):
             title=f"Server List ({len(guilds)} total)",
             data=data,
             per_page=10,
-            color=discord.Color(0x944ae8)
+            colour=discord.Colour(0x944ae8)
         )
 
         await interaction.response.send_message(
