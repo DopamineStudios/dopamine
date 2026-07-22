@@ -487,7 +487,7 @@ class ManageEmbedPage(PrivateLayoutView):
 
         container.add_item(control_row)
         control_row = discord.ui.ActionRow()
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
         container.add_item(discord.ui.Separator())
         control_row.add_item(return_btn)

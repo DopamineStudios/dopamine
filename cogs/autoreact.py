@@ -267,7 +267,7 @@ class ManagePage(PrivateLayoutView):
 
         container.add_item(discord.ui.Separator())
 
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
 
         row_ret = discord.ui.ActionRow()
@@ -373,7 +373,7 @@ class EditPage(PrivateLayoutView):
 
         container.add_item(discord.ui.Separator())
 
-        return_btn = discord.ui.Button(label="Return to Manage Menu", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_manage
 
         row3 = discord.ui.ActionRow()

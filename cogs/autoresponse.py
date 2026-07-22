@@ -302,7 +302,7 @@ class ManageAutoresponsePage(PrivateLayoutView):
             container.add_item(nav_row)
 
         container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
 
         async def return_home(interaction: discord.Interaction):
             view = AutoresponseDashboard(self.user, self.cog, self.guild_id)
@@ -413,7 +413,7 @@ class EditAutoresponsePage(PrivateLayoutView):
 
         container.add_item(discord.ui.Separator())
 
-        return_btn = discord.ui.Button(label="Return to Manage Page", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         row3 = discord.ui.ActionRow()
         row3.add_item(return_btn)
         container.add_item(row3)

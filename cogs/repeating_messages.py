@@ -498,7 +498,7 @@ class ManagePage(PrivateLayoutView):
 
             row = discord.ui.ActionRow()
 
-            return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+            return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
             return_btn.callback = self.return_home
             row.add_item(return_btn)
 
@@ -508,7 +508,7 @@ class ManagePage(PrivateLayoutView):
         if not panels and self.page == 1:
             container.add_item(discord.ui.Separator())
             row = discord.ui.ActionRow()
-            return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+            return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
             return_btn.callback = self.return_home
             row.add_item(return_btn)
             container.add_item(row)
@@ -639,7 +639,7 @@ class EditPage(PrivateLayoutView):
         container.add_item(row1)
 
         back_row = discord.ui.ActionRow()
-        btn_back = discord.ui.Button(label="Return to Manage Menu", style=discord.ButtonStyle.secondary)
+        btn_back = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         btn_back.callback = self.back_callback
         back_row.add_item(btn_back)
         container.add_item(discord.ui.Separator())

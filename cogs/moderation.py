@@ -542,7 +542,7 @@ class MessageReportDashboard(PrivateLayoutView):
             ))
 
         container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
 
         container.add_item(discord.ui.ActionRow(return_btn))
@@ -929,7 +929,7 @@ class SettingsPage(PrivateLayoutView):
         ))
 
         container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
 
         container.add_item(discord.ui.ActionRow(return_btn))
@@ -1078,7 +1078,7 @@ class CustomisationPage(PrivateLayoutView):
         container.add_item(control_row)
 
         container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
         container.add_item(discord.ui.ActionRow(return_btn))
 

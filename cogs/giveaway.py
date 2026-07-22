@@ -788,7 +788,7 @@ class MystuffPage(PrivateLayoutView):
         row.add_item(create_btn)
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to Template Homepage", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -874,7 +874,7 @@ class EditPage(PrivateLayoutView):
 
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to My Templates", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -1031,7 +1031,7 @@ class BrowsePage(PrivateLayoutView):
         row.add_item(sort_dropdown)
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label=f"Return to {'Template Homepage' if self.is_th else 'Previous Page'}", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -1183,7 +1183,7 @@ class CreatewithtemplatePage(PrivateLayoutView):
 
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to Create Giveaway Page", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -1258,7 +1258,7 @@ class MystuffUse(PrivateLayoutView):
         row.add_item(right_btn)
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to Previous Page", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
