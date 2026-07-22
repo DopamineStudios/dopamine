@@ -1588,7 +1588,7 @@ class AllActiveInfractionsPage(PrivateLayoutView):
             discord.SelectOption(label="Newest Punishment", value=self.SORT_RECENT),
             discord.SelectOption(label="Oldest Punishment", value=self.SORT_OLDEST),
             discord.SelectOption(label="Alphabetical (A–Z)", value=self.SORT_ALPHA),
-            discord.SelectOption(label="Reverse Alphabetical (Z–A)", value=self.SORT_REVALPHA),
+            discord.SelectOption(label="Alphabetical (Z–A)", value=self.SORT_REVALPHA),
         ]
         for option in sort_options:
             if option.value == self.current_sort:

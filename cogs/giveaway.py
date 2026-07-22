@@ -1014,7 +1014,7 @@ class BrowsePage(PrivateLayoutView):
             discord.SelectOption(label='Most Popular', value='popular'),
             discord.SelectOption(label='Least Popular', value='unpopular'),
             discord.SelectOption(label='Alphabetical (A–Z)', value='alpha'),
-            discord.SelectOption(label='Reverse Alphabetical (Z–A)', value='revalpha')
+            discord.SelectOption(label='Alphabetical (Z–A)', value='revalpha')
         ]
 
         for option in sort_options:
