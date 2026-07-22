@@ -1662,6 +1662,35 @@ class AllActiveInfractionsPage(PrivateLayoutView):
         await interaction.response.edit_message(view=self)
 
 
+class CaseIDSearchModal(discord.ui.Modal):
+    def __init__(self, parent_view):
+        super().__init__(title="Search by Case ID")
+        self.parent_view = parent_view
+        self.case_id_input = discord.ui.TextInput(
+            label="Case ID",
+            placeholder="Enter the numeric Case ID (e.g., 123)...",
+            min_length=1,
+            max_length=10,
+            required=True,
+        )
+        self.add_item(self.case_id_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        query = self.case_id_input.value.strip()
+
+        if not query.isdigit():
+            return await interaction.response.send_message("Please enter a valid numeric Case ID.", ephemeral=True)
+
+        self.parent_view.search_query = query
+        self.parent_view.container_header = f"Search results for Case #{query}"
+        self.parent_view.page = 1
+
+        await self.parent_view.refresh_data()
+        self.parent_view.build_layout()
+
+        await interaction.response.edit_message(view=self.parent_view)
+
+
 class AllCasesPage(PrivateLayoutView):
     SORT_NEWEST = "newest"
     SORT_OLDEST = "oldest"
@@ -1778,12 +1807,15 @@ class AllCasesPage(PrivateLayoutView):
         container.add_item(nav_row)
         container.add_item(discord.ui.Separator())
         control_row = discord.ui.ActionRow()
-        search_btn = discord.ui.Button(label="Search by User ID", style=discord.ButtonStyle.primary)
-        search_btn.callback = self.search_callback
+        search_case_id_btn = discord.ui.Button(label="Search by Case ID", style=discord.ButtonStyle.primary)
+        search_case_id_btn.callback = self.search_case_id_callback
+        search_user_id_btn = discord.ui.Button(label="Search by User ID", style=discord.ButtonStyle.primary)
+        search_user_id_btn.callback = self.search_user_id_callback
         clear_btn = discord.ui.Button(label="Clear Search", style=discord.ButtonStyle.secondary,
                                       disabled=(not self.search_query))
         clear_btn.callback = self.clear_search_callback
-        control_row.add_item(search_btn)
+        control_row.add_item(search_case_id_btn)
+        control_row.add_item(search_user_id_btn)
         control_row.add_item(clear_btn)
         container.add_item(control_row)
 
@@ -1830,7 +1862,10 @@ class AllCasesPage(PrivateLayoutView):
     async def go_to_page_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
 
-    async def search_callback(self, interaction: discord.Interaction):
+    async def search_case_id_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(CaseIDSearchModal(self))
+
+    async def search_user_id_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(CaseUserSearchModal(self))
 
     async def clear_search_callback(self, interaction: discord.Interaction):
