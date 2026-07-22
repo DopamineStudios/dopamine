@@ -1776,9 +1776,9 @@ class AllCasesPage(PrivateLayoutView):
         nav_row.add_item(go_btn)
         nav_row.add_item(right_btn)
         container.add_item(nav_row)
-
+        container.add_item(discord.ui.Separator())
         control_row = discord.ui.ActionRow()
-        search_btn = discord.ui.Button(label="Search", style=discord.ButtonStyle.primary)
+        search_btn = discord.ui.Button(label="Search by User ID", style=discord.ButtonStyle.primary)
         search_btn.callback = self.search_callback
         clear_btn = discord.ui.Button(label="Clear Search", style=discord.ButtonStyle.secondary,
                                       disabled=(not self.search_query))
