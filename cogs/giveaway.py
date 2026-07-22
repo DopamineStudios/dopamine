@@ -1011,10 +1011,10 @@ class BrowsePage(PrivateLayoutView):
         container.add_item(row)
 
         sort_options = [
-            discord.SelectOption(label='Sort by Most Popular', value='popular'),
-            discord.SelectOption(label='Sort by Least Popular', value='unpopular'),
-            discord.SelectOption(label='Sort by Alphabetical Order', value='alpha'),
-            discord.SelectOption(label='Sort by Reversed Alphabetical Order', value='revalpha')
+            discord.SelectOption(label='Most Popular', value='popular'),
+            discord.SelectOption(label='Least Popular', value='unpopular'),
+            discord.SelectOption(label='Alphabetical (A–Z)', value='alpha'),
+            discord.SelectOption(label='Reverse Alphabetical (Z–A)', value='revalpha')
         ]
 
         for option in sort_options:
