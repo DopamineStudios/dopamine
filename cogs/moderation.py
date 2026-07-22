@@ -1585,10 +1585,10 @@ class AllActiveInfractionsPage(PrivateLayoutView):
         sort_options = [
             discord.SelectOption(label=f"Most {term}", value=self.SORT_MOST),
             discord.SelectOption(label=f"Least {term}", value=self.SORT_LEAST),
-            discord.SelectOption(label="Most Recent Punishment", value=self.SORT_RECENT),
+            discord.SelectOption(label="Newest Punishment", value=self.SORT_RECENT),
             discord.SelectOption(label="Oldest Punishment", value=self.SORT_OLDEST),
             discord.SelectOption(label="Alphabetical (A–Z)", value=self.SORT_ALPHA),
-            discord.SelectOption(label="Alphabetical (Z–A)", value=self.SORT_REVALPHA),
+            discord.SelectOption(label="Reverse Alphabetical (Z–A)", value=self.SORT_REVALPHA),
         ]
         for option in sort_options:
             if option.value == self.current_sort:
@@ -1794,8 +1794,8 @@ class AllCasesPage(PrivateLayoutView):
         sort_options = [
             discord.SelectOption(label="Newest First", value=self.SORT_NEWEST),
             discord.SelectOption(label="Oldest First", value=self.SORT_OLDEST),
-            discord.SelectOption(label=f"Highest {term}", value=self.SORT_HIGHEST),
-            discord.SelectOption(label=f"Lowest {term}", value=self.SORT_LOWEST),
+            discord.SelectOption(label=f"Most {term}", value=self.SORT_HIGHEST),
+            discord.SelectOption(label=f"Least {term}", value=self.SORT_LOWEST),
             discord.SelectOption(label="Case ID (Ascending)", value=self.SORT_CASE_ASC),
             discord.SelectOption(label="Case ID (Descending)", value=self.SORT_CASE_DESC),
         ]
