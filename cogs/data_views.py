@@ -772,6 +772,7 @@ class RemovalFeedbackListPage(PrivateLayoutView):
 
         if not chunk:
             container.add_item(discord.ui.TextDisplay("*(No feedback entries found)*"))
+            container.add_item(discord.ui.Separator())
         else:
             for gid, gname, uid, reason, other, responded_at in chunk:
                 reason_label = RemovalFeedbackView.REASONS.get(reason, reason)
