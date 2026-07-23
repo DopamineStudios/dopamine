@@ -1205,15 +1205,9 @@ class CaseDetailPage(PrivateLayoutView):
         container.add_item(action_row)
 
         if self.parent is not None:
-            if isinstance(self.parent, AllActiveInfractionsPage):
-                back_label = "Back to Active Infractions"
-            elif isinstance(self.parent, CaseUserHistoryPage):
-                back_label = "Back to User History"
-            else:
-                back_label = "Back"
             container.add_item(discord.ui.Separator())
             row = discord.ui.ActionRow()
-            back_btn = discord.ui.Button(label=back_label, style=discord.ButtonStyle.secondary)
+            back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
             back_btn.callback = self.back_callback
             row.add_item(back_btn)
             container.add_item(row)
