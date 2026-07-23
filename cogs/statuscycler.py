@@ -20,7 +20,7 @@ class StatusCog(commands.Cog):
         total_members = sum(guild.member_count for guild in self.bot.guilds if guild.member_count)
 
         return [
-            "✨ Geometry DASH <:Geometrydash:1529821796222894211>",
+            "✨ Geometry DASH",
             f"✨ Watching {guild_count} Servers",
             "✨ Watching downfall of GiveawayBot",
             f"✨ Watching {user_installs} User-installs",
