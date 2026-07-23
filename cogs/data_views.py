@@ -504,12 +504,14 @@ class RemovalFeedbackView(PrivateLayoutView):
         self.cog = cog
         self.guild_id = guild_id
         self.guild_name = guild_name
+        self.feedback_done = False
+        self.message = None
         self.build_layout()
 
     def build_layout(self):
         self.clear_items()
         container = discord.ui.Container()
-        container.add_item(discord.ui.TextDisplay("## See you next time!"))
+        container.add_item(discord.ui.TextDisplay("## See you next time!" if not self.feedback_done else "## Thank you for your feedback!"))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
             f"Would you mind sharing why your server (**{self.guild_name}**) decided to kick Dopamine?"
@@ -517,10 +519,10 @@ class RemovalFeedbackView(PrivateLayoutView):
         container.add_item(discord.ui.Separator())
         row = discord.ui.ActionRow()
         for key, label in self.REASONS.items():
-            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary)
+            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, disabled=self.feedback_done)
             btn.callback = self._make_reason(key)
             row.add_item(btn)
-        other = discord.ui.Button(label="Other", style=discord.ButtonStyle.secondary)
+        other = discord.ui.Button(label="Other", style=discord.ButtonStyle.secondary, disabled=self.feedback_done)
         other.callback = self._other
         row.add_item(other)
         container.add_item(row)
@@ -529,28 +531,41 @@ class RemovalFeedbackView(PrivateLayoutView):
     def _make_reason(self, reason: str):
         async def cb(interaction: discord.Interaction):
             await self.cog.save_removal_feedback(self.guild_id, self.guild_name, interaction.user.id, reason)
-            await interaction.response.edit_message(view=None)
-            await interaction.followup.send("Thank you for your feedback!", ephemeral=True)
+            self.feedback_done = True
+            self.build_layout()
+            await interaction.response.edit_message(view=self)
+            self.stop()
         return cb
 
     async def _other(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(RemovalFeedbackModal(self.cog, self.guild_id, self.guild_name))
+        await interaction.response.send_modal(RemovalFeedbackModal(self.cog, self.guild_id, self.guild_name, self))
+
+    async def on_timeout(self) -> None:
+        try:
+            await self.message.delete()
+        except Exception:
+            pass
+        self.stop()
 
 
 class RemovalFeedbackModal(discord.ui.Modal, title="Feedback"):
     detail = discord.ui.TextInput(label="Tell us more (optional)", required=False, max_length=500)
 
-    def __init__(self, cog, guild_id: int, guild_name: str):
+    def __init__(self, cog, guild_id: int, guild_name: str, parent_view):
         super().__init__()
         self.cog = cog
         self.guild_id = guild_id
         self.guild_name = guild_name
+        self.parent_view = parent_view
 
     async def on_submit(self, interaction: discord.Interaction):
         await self.cog.save_removal_feedback(
             self.guild_id, self.guild_name, interaction.user.id, "other", self.detail.value or None
         )
-        await interaction.response.send_message("Thank you for your feedback!", ephemeral=True)
+        self.parent_view.feedback_done = True
+        self.parent_view.build_layout()
+        await self.parent_view.message.edit(view=self.parent_view)
+        self.parent_view.stop()
 
 
 class InsightsDashboard(PrivateLayoutView):
