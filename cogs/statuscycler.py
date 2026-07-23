@@ -20,8 +20,7 @@ class StatusCog(commands.Cog):
         total_members = sum(guild.member_count for guild in self.bot.guilds if guild.member_count)
 
         return [
-            "✨ v4 just dropped baby!",
-            "✨ The SuiteCASE Update",
+            "✨ Geometry DASH <:Geometrydash:1529821796222894211>",
             f"✨ Watching {guild_count} Servers",
             "✨ Watching downfall of GiveawayBot",
             f"✨ Watching {user_installs} User-installs",
@@ -35,6 +34,7 @@ class StatusCog(commands.Cog):
             "✨ girl are you dopamine? cuz damn youre dopaFINE!",
             "✨ It's so hard being the best!",
             "✨ moderator? i barely know her",
+            "✨ Dash-da-da, dash-da-da, dash-da, like it's magnetic"
             "✨ Giving Sapphire a hug (aww!)"
         ]
 
