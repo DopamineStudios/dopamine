@@ -1701,7 +1701,7 @@ class AllCasesPage(PrivateLayoutView):
 
     def __init__(self, user, cog, guild: discord.Guild, term: str, page: int = 1,
                  current_sort: str = SORT_NEWEST, search_query: str = None,
-                 container_header: str = None):
+                 container_header: str = None, live: bool = False):
         super().__init__(user, timeout=None)
         self.cog = cog
         self.guild = guild
@@ -1712,6 +1712,7 @@ class AllCasesPage(PrivateLayoutView):
         self.current_sort = current_sort
         self.search_query = search_query
         self.container_header = container_header
+        self.live = live
         self.entries: List[dict] = []
         self.filtered_entries: List[dict] = []
         self.total_pages = 1
@@ -1721,6 +1722,14 @@ class AllCasesPage(PrivateLayoutView):
     async def initialize(self):
         await self.refresh_data()
         self.build_layout()
+
+    def pause_live(self):
+        if self.message:
+            self.cog.unregister_live_case_view(self.message.id)
+
+    def resume_live(self):
+        if self.live and self.message:
+            self.cog.register_live_case_view(self.message.id, self)
 
     async def refresh_data(self):
         self.entries = await self.cog.get_all_infractions(self.guild_id)
@@ -1758,14 +1767,25 @@ class AllCasesPage(PrivateLayoutView):
         container = discord.ui.Container()
 
         count_text = f"{len(self.filtered_entries)} Total Cases"
+        if self.live:
+            count_text += " • Live"
+
         if not self.container_header:
             header = f"## Case Log — {count_text}"
         else:
             header = f"## {self.container_header}"
 
+        live_btn = discord.ui.Button(
+            label="Disable Live Mode" if self.live else "Enable Live Mode",
+            style=discord.ButtonStyle.secondary if self.live else discord.ButtonStyle.success,
+        )
+        live_btn.callback = self.live_callback
+
         container.add_item(discord.ui.TextDisplay(header))
-        container.add_item(discord.ui.TextDisplay(
-            f"Browsing all recorded infractions. Use search to find specific Case IDs or User IDs."))
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(f"Browsing all recorded infractions. Use search to find specific Case IDs or User IDs."),
+            accessory=live_btn
+        ))
         container.add_item(discord.ui.Separator())
 
         start = (self.page - 1) * self.per_page
@@ -1841,8 +1861,18 @@ class AllCasesPage(PrivateLayoutView):
 
         self.add_item(container)
 
+    async def live_callback(self, interaction: discord.Interaction):
+        self.live = not self.live
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+        if self.live and self.message:
+            self.cog.register_live_case_view(self.message.id, self)
+        elif self.message:
+            self.cog.unregister_live_case_view(self.message.id)
+
     def create_details_callback(self, case):
         async def callback(interaction: discord.Interaction):
+            self.pause_live()
             view = CaseDetailPage(self.user, self.cog, self.guild, case, self.term)
             await interaction.response.edit_message(view=view)
             view.message = self.message
