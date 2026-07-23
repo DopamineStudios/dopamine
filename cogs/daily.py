@@ -7,9 +7,11 @@ from datetime import datetime, timedelta, time
 import json
 
 import discord
+from beacon.core.preconditions import permissions_preset
 from discord import app_commands, Interaction, TextChannel
 from discord.ext import commands, tasks
 from beacon import beacon_commands
+from discord.ui import file_upload
 
 from config import DDB_PATH
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
@@ -38,6 +40,221 @@ class DatabasePool:
     async def close(self):
         for conn in self.connections:
             await conn.close()
+
+
+class DeleteImageModal(discord.ui.Modal):
+    def __init__(self, cog: "DailyCats", image_ids: list[int], group_idx: int):
+        super().__init__(title=f"Delete Image from Group {group_idx + 1}")
+        self.cog = cog
+        self.image_ids = image_ids
+        max_idx = len(image_ids)
+
+        self.index_input = discord.ui.TextInput(
+            label=f"Image Index (1 - {max_idx})",
+            placeholder=f"Enter a number between 1 and {max_idx}...",
+            min_length=1,
+            max_length=2,
+            required=True
+        )
+        self.add_item(self.index_input)
+
+    async def on_submit(self, interaction: Interaction):
+        try:
+            val = int(self.index_input.value.strip())
+            if not (1 <= val <= len(self.image_ids)):
+                return await interaction.response.send_message(
+                    f"Invalid index. Please enter a number between 1 and {len(self.image_ids)}.", ephemeral=True
+                )
+        except ValueError:
+            return await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+
+        target_id = self.image_ids[val - 1]
+        conn = self.cog.db_pool.get_connection()
+        await conn.execute("DELETE FROM cat_images WHERE id = ?", (target_id,))
+        await conn.commit()
+
+        await interaction.response.send_message(
+            f"Successfully deleted image #{val} (Database ID: `{target_id}`)!", ephemeral=True
+        )
+
+
+class AddImageModal(discord.ui.Modal, title="Add Cat Image"):
+    def __init__(self, cog: "DailyCats"):
+        super().__init__()
+        self.cog = cog
+        self.file_upload = discord.ui.FileUpload(
+            required=True,
+            max_values=10
+        )
+        self.add_item(discord.ui.Label(text="Select Image", description="Upload a PNG, JPEG, or GIF image to add to the daily cat database.", component=self.file_upload))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        uploaded_files = self.file_upload.values
+        if not uploaded_files:
+            return await interaction.followup.send("No files uploaded.", ephemeral=True)
+
+        valid_types = {'image/png', 'image/jpeg', 'image/gif'}
+        saved_count = 0
+        failed_files = []
+
+        for uploaded_file in uploaded_files:
+            if uploaded_file.content_type not in valid_types:
+                failed_files.append(f"`{uploaded_file.filename}` (Invalid type: {uploaded_file.content_type})")
+                continue
+
+            try:
+                image_bytes = await uploaded_file.read()
+                conn = self.cog.db_pool.get_connection()
+                await conn.execute("INSERT INTO cat_images (image_data) VALUES (?)", (image_bytes,))
+                await conn.commit()
+                saved_count += 1
+            except Exception as e:
+                failed_files.append(f"`{uploaded_file.filename}` ({e})")
+
+        # 3. Construct a summary response for the user
+        response_msg = []
+        if saved_count > 0:
+            response_msg.append(f"Successfully added **{saved_count}** image(s) to the database!")
+        if failed_files:
+            response_msg.append("Failed to upload the following files:\n" + "\n".join(f"- {f}" for f in failed_files))
+
+        await interaction.followup.send("\n\n".join(response_msg), ephemeral=True)
+
+
+class CatDashboardView(discord.ui.LayoutView):
+    def __init__(self, cog: "DailyCats", images: list[tuple[int, bytes]], page: int = 0):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.images = images
+        self.page = page
+        self.items_per_group = 5
+        self.groups_per_page = 2
+        self.items_per_page = self.items_per_group * self.groups_per_page
+
+        self.max_pages = max(1, (len(self.images) + self.items_per_page - 1) // self.items_per_page)
+
+    async def build(self) -> list[discord.File]:
+        """Constructs V2 component tree and returns associated image discord.Files."""
+        files = []
+
+        header_container = discord.ui.Container()
+        header_container.add_item(
+            discord.ui.TextDisplay(
+                f"# 🐱 Cat Image Dashboard\n"
+                f"Total Images: **{len(self.images)}** | Page **{self.page + 1}** of **{self.max_pages}**"
+            )
+        )
+        self.add_item(header_container)
+
+        start_idx = self.page * self.items_per_page
+        page_images = self.images[start_idx:start_idx + self.items_per_page]
+
+        if not page_images:
+            empty_container = discord.ui.Container()
+            empty_container.add_item(discord.ui.TextDisplay("*No cat images found in the database.*"))
+            self.add_item(empty_container)
+        else:
+            for group_idx in range(0, len(page_images), self.items_per_group):
+                group_chunk = page_images[group_idx:group_idx + self.items_per_group]
+                group_num = (group_idx // self.items_per_group) + 1
+
+                group_container = discord.ui.Container()
+                group_container.add_item(
+                    discord.ui.TextDisplay(f"### Group {group_num} ({len(group_chunk)} Images)")
+                )
+
+                gallery = discord.ui.MediaGallery()
+                group_ids = []
+
+                for idx, (img_id, img_bytes) in enumerate(group_chunk):
+                    filename = f"p{self.page}_g{group_num}_i{idx}_{img_id}.png"
+                    file = discord.File(io.BytesIO(img_bytes), filename=filename)
+                    files.append(file)
+                    group_ids.append(img_id)
+
+                    gallery.add_item(media=f"attachment://{filename}")
+
+                group_container.add_item(gallery)
+
+                del_row = discord.ui.ActionRow()
+                del_btn = discord.ui.Button(
+                    label=f"Delete Image from Group {group_num}",
+                    style=discord.ButtonStyle.danger,
+                    custom_id=f"cd_del_{self.page}_{group_num}"
+                )
+
+                async def make_del_callback(ids=group_ids, g_num=group_num):
+                    async def callback(interaction: Interaction):
+                        await interaction.response.send_modal(DeleteImageModal(self.cog, ids, g_num - 1))
+                    return callback
+
+                del_btn.callback = await make_del_callback()
+                del_row.add_item(del_btn)
+                group_container.add_item(del_row)
+
+                self.add_item(group_container)
+
+        nav_container = discord.ui.Container()
+        nav_row = discord.ui.ActionRow()
+
+        prev_btn = discord.ui.Button(
+            label="◀ Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.page == 0)
+        )
+        prev_btn.callback = self.prev_page
+        nav_row.add_item(prev_btn)
+
+        next_btn = discord.ui.Button(
+            label="Next ▶",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.page >= self.max_pages - 1)
+        )
+        next_btn.callback = self.next_page
+        nav_row.add_item(next_btn)
+
+        add_btn = discord.ui.Button(
+            label="➕ Add Image",
+            style=discord.ButtonStyle.success,
+            custom_id="cd_add_img"
+        )
+        add_btn.callback = self.add_image_click
+        nav_row.add_item(add_btn)
+
+        nav_container.add_item(nav_row)
+        self.add_item(nav_container)
+
+        return files
+
+    async def prev_page(self, interaction: Interaction):
+        if self.page > 0:
+            self.page -= 1
+            await self.refresh_dashboard(interaction)
+
+    async def next_page(self, interaction: Interaction):
+        if self.page < self.max_pages - 1:
+            self.page += 1
+            await self.refresh_dashboard(interaction)
+
+    async def add_image_click(self, interaction: Interaction):
+        await interaction.response.send_modal(AddImageModal(self.cog))
+
+    async def refresh_dashboard(self, interaction: Interaction):
+        await interaction.response.defer()
+        conn = self.cog.db_pool.get_connection()
+        async with conn.execute("SELECT id, image_data FROM cat_images ORDER BY id ASC") as cursor:
+            self.images = await cursor.fetchall()
+
+        self.max_pages = max(1, (len(self.images) + self.items_per_page - 1) // self.items_per_page)
+        self.page = min(self.page, self.max_pages - 1)
+
+        new_view = CatDashboardView(self.cog, self.images, page=self.page)
+        files = await new_view.build()
+
+        await interaction.edit_original_response(attachments=files, view=new_view
+        )
 
 
 class DailyCats(commands.Cog):
@@ -96,6 +313,21 @@ class DailyCats(commands.Cog):
         )
         await conn.commit()
 
+    @beacon_commands.command(name="cd", description="Open the Cat Dashboard for image management (Owner only).", permissions_preset="bot_owner")
+    async def cd(self, interaction: Interaction):
+        await interaction.response.defer(ephemeral=True)
+        conn = self.db_pool.get_connection()
+        async with conn.execute("SELECT id, image_data FROM cat_images ORDER BY id ASC") as cursor:
+            images = await cursor.fetchall()
+
+        view = CatDashboardView(self, images, page=0)
+        files = await view.build()
+
+        await interaction.edit_original_response(
+            attachments=files,
+            view=view,
+        )
+
     @commands.command(name="catadd", hidden=True)
     @commands.is_owner()
     async def catadd(self, ctx: commands.Context):
@@ -122,7 +354,7 @@ class DailyCats(commands.Cog):
 
         await conn.commit()
         await ctx.send(f"Successfully added {images_added} cat pics to the database!", delete_after=10)
-        asyncio.sleep(10)
+        await asyncio.sleep(10)
         await ctx.message.delete()
 
     @tasks.loop(seconds=30)
