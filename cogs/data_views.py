@@ -571,7 +571,7 @@ class InsightsDashboard(PrivateLayoutView):
             f"**Last 30 days:** {stats.get('month', 0):,}\n"
             f"**All time:** {stats.get('all_time', 0):,}\n\n"
             f"**Last backup:** {stats.get('last_backup', 'Never')}\n"
-            f"**Removal feedback responses:** {stats.get('feedback_count', 0)}"
+            f"**Bot removal feedback responses:** {stats.get('feedback_count', 0)}"
         ))
         container.add_item(discord.ui.Separator())
         row = discord.ui.ActionRow()
@@ -611,13 +611,14 @@ class InsightsFeaturePage(PrivateLayoutView):
         for feat_id, count in chunk:
             container.add_item(discord.ui.TextDisplay(f"### {feat_id}\n**{count:,}** total uses"))
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total}"))
         nav = discord.ui.ActionRow()
         prev_b = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
+        page_b = discord.ui.Button(label=f"Page {self.page} of {total}", style=discord.ButtonStyle.secondary, disabled=True)
         next_b = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=self.page >= total)
         prev_b.callback = self._prev
         next_b.callback = self._next
         nav.add_item(prev_b)
+        nav.add_item(page_b)
         nav.add_item(next_b)
         container.add_item(nav)
         back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary)
