@@ -174,6 +174,7 @@ class DailyCats(commands.Cog):
                     try:
                         file = discord.File(io.BytesIO(image_blob), filename="daily_cat.png")
                         await ch.send(content="Today's Cat Pic:", file=file)
+                        await asyncio.sleep(0.25)
                     except Exception as e:
                         if is_access_error(e):
                             conn = self.db_pool.get_connection()
