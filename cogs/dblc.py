@@ -22,23 +22,6 @@ class Dblc(commands.Cog):
         self.process.cpu_percent(interval=None)
         self.current_cpu = 0.0
         self.last_uptime = 0
-        self.uptime_check.start()
-
-    def cog_unload(self):
-        self.uptime_check.cancel()
-
-    @tasks.loop(hours=72.0)
-    async def uptime_check(self):
-
-        try:
-            await self.bot.reload_extension("cogs.uptimemonitor")
-        except Exception as e:
-            print(f"Failed to reload uptimemonitor: {e}")
-
-
-    @uptime_check.before_loop
-    async def before_uptime_check(self):
-        await self.bot.wait_until_ready()
 
     @beacon_commands.command(name="avatar", description="Get a user's avatar.")
     @app_commands.describe(user="The user whose avatar you want to see.")
