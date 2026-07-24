@@ -67,7 +67,7 @@ class Dblc(commands.Cog):
         if log_ch:
             log_embed = discord.Embed(
                 title="Messages Purged",
-                description=f"* **Amount Purged:** {deleted_count}** Message(s)\n* **Channel:** {interaction.channel.mention}\n* **Reason:** {reason if reason else 'No reason provided.'}",
+                description=f"* **Amount Purged:** {deleted_count} Message(s)\n* **Channel:** {interaction.channel.mention}\n* **Reason:** {reason if reason else 'No reason provided.'}",
                 color=discord.Color.red()
             )
             log_embed.set_footer(text=f"By {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
