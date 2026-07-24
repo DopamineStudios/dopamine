@@ -52,8 +52,8 @@ class Dblc(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @beacon_commands.command(name="purge", description="Delete recent messages.", permissions_preset="support")
-    @app_commands.describe(number="Number of messages to delete (max 100)")
-    async def purge(self, interaction: discord.Interaction, number: int):
+    @app_commands.describe(number="Number of messages to delete (max 100)", reason="An optional reason for this message purge")
+    async def purge(self, interaction: discord.Interaction, number: int, reason: str | None = None):
         number = max(1, min(number, 100))
 
         await interaction.response.defer(ephemeral=True)
@@ -83,7 +83,8 @@ class Dblc(commands.Cog):
             log_ch = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
         if log_ch:
             log_embed = discord.Embed(
-                description=f"**{deleted_count}** message(s) purged in {interaction.channel.mention}.",
+                title="Messages Purged",
+                description=f"* **Amount Purged:** {deleted_count}** Message(s)\n* **Channel:** {interaction.channel.mention}\n* **Reason:** {reason if reason else 'No reason provided.'}",
                 color=discord.Color.red()
             )
             log_embed.set_footer(text=f"By {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
