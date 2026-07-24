@@ -472,7 +472,6 @@ class ManagePage(PrivateLayoutView):
                 display_text = f"{idx}. **{p_title}** in <#{chan_id}>"
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(display_text), accessory=btn_edit))
 
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total_pages}"))
 
             container.add_item(discord.ui.Separator())
             row = discord.ui.ActionRow()
@@ -481,7 +480,7 @@ class ManagePage(PrivateLayoutView):
             left_btn.callback = self.prev_page
             row.add_item(left_btn)
 
-            go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary, disabled=(total_pages == 1))
+            go_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}", style=discord.ButtonStyle.secondary, disabled=(total_pages == 1))
 
             async def go_to_page_callback(interaction: discord.Interaction):
                 modal = GoToPageModal(self, total_pages)
@@ -499,7 +498,7 @@ class ManagePage(PrivateLayoutView):
 
             row = discord.ui.ActionRow()
 
-            return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+            return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
             return_btn.callback = self.return_home
             row.add_item(return_btn)
 
@@ -509,7 +508,7 @@ class ManagePage(PrivateLayoutView):
         if not panels and self.page == 1:
             container.add_item(discord.ui.Separator())
             row = discord.ui.ActionRow()
-            return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+            return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
             return_btn.callback = self.return_home
             row.add_item(return_btn)
             container.add_item(row)
@@ -640,7 +639,7 @@ class EditPage(PrivateLayoutView):
         container.add_item(row1)
 
         back_row = discord.ui.ActionRow()
-        btn_back = discord.ui.Button(label="Return to Manage Menu", style=discord.ButtonStyle.secondary)
+        btn_back = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         btn_back.callback = self.back_callback
         back_row.add_item(btn_back)
         container.add_item(discord.ui.Separator())

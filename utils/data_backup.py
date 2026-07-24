@@ -62,6 +62,10 @@ def make_backup_filename() -> str:
 
 
 def rotate_old_backups(backup_dir: Path, keep: str) -> None:
-    for old in backup_dir.glob("dopamine-backup-*.zip"):
-        if old.name != keep:
-            old.unlink(missing_ok=True)
+    """Keep up to 10 recent backups and remove older ones."""
+    backups = list(backup_dir.glob("dopamine-backup-*.zip"))
+
+    backups.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+
+    for old in backups[10:]:
+        old.unlink(missing_ok=True)

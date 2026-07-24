@@ -50,6 +50,8 @@ bot = BeaconAutoShardedBot(
     bot_logger=logger
 )
 
+bot.back_emoji = discord.PartialEmoji.from_str("<:back:1529498596402008225>")
+
 @bot.tree.context_menu(name="Get User ID")
 async def get_user_id(interaction: discord.Interaction, message: discord.Message):
     author = message.author

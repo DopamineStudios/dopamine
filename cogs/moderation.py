@@ -542,7 +542,7 @@ class MessageReportDashboard(PrivateLayoutView):
             ))
 
         container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
 
         container.add_item(discord.ui.ActionRow(return_btn))
@@ -806,8 +806,9 @@ class ModerationDashboard(PrivateLayoutView):
             f"* 1 {term}: Warning\n"
             f"* 2 {term}: 1h Timeout\n"
             f"* 3-4 {term}: Incremental Bans (12h to 1 week)\n"
-            f"* 5 {term}: Permanent Ban\n> The system is completely customizable, and you can customize {term.lower()} amounts for each action or disable an action completely.\n\n"
+            f"* 5 {term}: Permanent Ban\n> Dopamine's moderation system is completely customisable. Create new actions with any type of punishment and duration, delete old ones, or update the {term.lower()} amounts for an existing one.\n\n"
             "**Core Features:**\n"
+            f"* **Cases:** Dopamine stores every single moderation punishment as its own case. View, sort, and search through all cases with `/case all`, view a list of all users with infractions using `/case users`, or view an individual user's case history using `/case history`."
             f"* **Decay:** {term} drop by 1 every set frequency (default: two weeks) if no new infractions occur.\n"
             f"* **Rejoin Policy:** Users unbanned via the bot start a set amount to prevent immediate repeat offenses by keeping them on thin ice."
         ))
@@ -888,13 +889,20 @@ class SettingsPage(PrivateLayoutView):
                                           style=discord.ButtonStyle.secondary if decay_log_on else discord.ButtonStyle.primary)
         decay_log_btn.callback = self.make_toggle_callback("decay_log_enabled", not decay_log_on)
 
+        medals_on = settings.get("show_medals", 1) == 1
+        medals_btn = discord.ui.Button(
+            label=f"{'Disable' if medals_on else 'Enable'} Medals",
+            style=discord.ButtonStyle.secondary if medals_on else discord.ButtonStyle.primary
+        )
+        medals_btn.callback = self.make_toggle_callback("show_medals", not medals_on)
+
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(
             f"* **Decay Frequency:** Edit the frequency at which one {'warning' if simple_on else 'point'} is decayed from a user. Current: **{'Disabled' if decay_val == 0 else f'{decay_val} Days'}**."),
                                               accessory=decay_btn))
 
         container.add_item(
             discord.ui.Section(discord.ui.TextDisplay(
-                """* **Simple Mode:**\n  * **Terminology:** Replaces "point" with "warning" and replaces `/point` command with `/warn` (single strike at a time only)\n  * The following simple five-strike preset is applied:\n    * 1 warning: Verbal warning, no punishment\n    * 2 warnings: 60-minute timeout/mute\n    * 3 warnings: 12-hour ban\n    * 4 warnings: 7-day ban\n    * 5 warnings: Permanent ban\n  * **Best For:** Users seeking a traditional moderation feel while retaining Dopamine’s decay and rejoin policies without the learning curve. (Note: Customization of actions and point/warning thresholds is still available in Simple Mode!)"""),
+                """* **Simple Mode:** The default configuration for Dopamine's moderation system that aims to mirror the experience of traditional moderation bots to make on-boarding easier. This setting is enabled by default.\n  * **Terminology:** Replaces "point" with "warning" and replaces `/point` command with `/warn` ("amount" option becomes optional and defaults to 1)\n  * The following simple five-strike preset is applied (you can still completely customise actions and replace this):\n    * 1 warning: Verbal warning, no punishment\n    * 2 warnings: 60-minute timeout\n    * 3 warnings: 12-hour ban\n    * 4 warnings: 7-day ban\n    * 5 warnings: Permanent ban"""),
                 accessory=simple_btn))
 
         container.add_item(
@@ -915,8 +923,13 @@ class SettingsPage(PrivateLayoutView):
             discord.ui.Section(discord.ui.TextDisplay("* **Punishment DMs:** Sends a DM to the user who is punished."),
                                accessory=dm_btn))
 
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay("* **Medals:** Show or hide medals next to names of users in Active Infractions list (`/case users` command)."),
+            accessory=medals_btn
+        ))
+
         container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
 
         container.add_item(discord.ui.ActionRow(return_btn))
@@ -1027,7 +1040,6 @@ class CustomisationPage(PrivateLayoutView):
                 display_text = f"{i}. **{display}**: `{action['points']}` {term.lower()}{'s' if action['points'] != 1 else ''}"
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(display_text), accessory=btn))
 
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total_pages}"))
             container.add_item(discord.ui.Separator())
 
             nav_row = discord.ui.ActionRow()
@@ -1036,7 +1048,7 @@ class CustomisationPage(PrivateLayoutView):
             left_btn.callback = self.prev_page
             nav_row.add_item(left_btn)
 
-            go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary,
+            go_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}", style=discord.ButtonStyle.secondary,
                                        disabled=(total_pages == 1))
             go_btn.callback = self.go_to_page_callback
             nav_row.add_item(go_btn)
@@ -1066,7 +1078,7 @@ class CustomisationPage(PrivateLayoutView):
         container.add_item(control_row)
 
         container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
+        return_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         return_btn.callback = self.return_home
         container.add_item(discord.ui.ActionRow(return_btn))
 
@@ -1193,15 +1205,9 @@ class CaseDetailPage(PrivateLayoutView):
         container.add_item(action_row)
 
         if self.parent is not None:
-            if isinstance(self.parent, AllActiveInfractionsPage):
-                back_label = "Back to Active Infractions"
-            elif isinstance(self.parent, CaseUserHistoryPage):
-                back_label = "Back to User History"
-            else:
-                back_label = "Back"
             container.add_item(discord.ui.Separator())
             row = discord.ui.ActionRow()
-            back_btn = discord.ui.Button(label=back_label, style=discord.ButtonStyle.secondary)
+            back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
             back_btn.callback = self.back_callback
             row.add_item(back_btn)
             container.add_item(row)
@@ -1306,13 +1312,12 @@ class CaseUserHistoryPage(PrivateLayoutView):
                 view_btn.callback = self.create_view_callback(case)
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=view_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         nav_row = discord.ui.ActionRow()
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1477,13 +1482,14 @@ class AllActiveInfractionsPage(PrivateLayoutView):
                 reverse=True,
             )
 
-    def _rank_emoji(self, rank: int) -> str:
-        if rank == 1:
-            return "🥇"
-        if rank == 2:
-            return "🥈"
-        if rank == 3:
-            return "🥉"
+    def _rank_emoji(self, rank: int, show_medals: bool) -> str:
+        if show_medals:
+            if rank == 1:
+                return "🥇"
+            if rank == 2:
+                return "🥈"
+            if rank == 3:
+                return "🥉"
         return f"**#{rank}**"
 
     def build_layout(self):
@@ -1512,13 +1518,17 @@ class AllActiveInfractionsPage(PrivateLayoutView):
         start = (self.page - 1) * self.per_page
         current = self.filtered_entries[start:start + self.per_page]
 
+        settings = self.cog.settings_cache.get(self.guild.id, {})
+        show_medals = settings.get("show_medals", 1) == 1
+
         if not current:
             container.add_item(discord.ui.TextDisplay("*No active infractions found.*"))
         else:
             for idx, entry in enumerate(current, start + 1):
                 uid = entry["user_id"]
                 name = self.display_names.get(uid, "Unknown User")
-                rank_label = self._rank_emoji(idx) if self.current_sort == self.SORT_MOST and not self.search_query else f"**#{idx}**"
+
+                rank_label = self._rank_emoji(idx, show_medals) if self.current_sort == self.SORT_MOST and not self.search_query else f"**#{idx}**"
                 last_p = (
                     f"<t:{entry['last_punishment']}:R>"
                     if entry["last_punishment"]
@@ -1534,14 +1544,12 @@ class AllActiveInfractionsPage(PrivateLayoutView):
                 cases_btn.callback = self.create_cases_callback(uid)
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=cases_btn))
 
-        live_status = "ON — auto-refreshing" if self.live else "OFF"
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages} • Live: {live_status}"))
         container.add_item(discord.ui.Separator())
 
         nav_row = discord.ui.ActionRow()
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1570,8 +1578,8 @@ class AllActiveInfractionsPage(PrivateLayoutView):
 
         sort_options = [
             discord.SelectOption(label=f"Most {term}", value=self.SORT_MOST),
-            discord.SelectOption(label="Least {term}", value=self.SORT_LEAST),
-            discord.SelectOption(label="Most Recent Punishment", value=self.SORT_RECENT),
+            discord.SelectOption(label=f"Least {term}", value=self.SORT_LEAST),
+            discord.SelectOption(label="Newest Punishment", value=self.SORT_RECENT),
             discord.SelectOption(label="Oldest Punishment", value=self.SORT_OLDEST),
             discord.SelectOption(label="Alphabetical (A–Z)", value=self.SORT_ALPHA),
             discord.SelectOption(label="Alphabetical (Z–A)", value=self.SORT_REVALPHA),
@@ -1648,6 +1656,35 @@ class AllActiveInfractionsPage(PrivateLayoutView):
         await interaction.response.edit_message(view=self)
 
 
+class CaseIDSearchModal(discord.ui.Modal):
+    def __init__(self, parent_view):
+        super().__init__(title="Search by Case ID")
+        self.parent_view = parent_view
+        self.case_id_input = discord.ui.TextInput(
+            label="Case ID",
+            placeholder="Enter the numeric Case ID (e.g., 123)...",
+            min_length=1,
+            max_length=10,
+            required=True,
+        )
+        self.add_item(self.case_id_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        query = self.case_id_input.value.strip()
+
+        if not query.isdigit():
+            return await interaction.response.send_message("Please enter a valid numeric Case ID.", ephemeral=True)
+
+        self.parent_view.search_query = query
+        self.parent_view.container_header = f"Search results for Case #{query}"
+        self.parent_view.page = 1
+
+        await self.parent_view.refresh_data()
+        self.parent_view.build_layout()
+
+        await interaction.response.edit_message(view=self.parent_view)
+
+
 class AllCasesPage(PrivateLayoutView):
     SORT_NEWEST = "newest"
     SORT_OLDEST = "oldest"
@@ -1658,7 +1695,7 @@ class AllCasesPage(PrivateLayoutView):
 
     def __init__(self, user, cog, guild: discord.Guild, term: str, page: int = 1,
                  current_sort: str = SORT_NEWEST, search_query: str = None,
-                 container_header: str = None):
+                 container_header: str = None, live: bool = False):
         super().__init__(user, timeout=None)
         self.cog = cog
         self.guild = guild
@@ -1669,6 +1706,7 @@ class AllCasesPage(PrivateLayoutView):
         self.current_sort = current_sort
         self.search_query = search_query
         self.container_header = container_header
+        self.live = live
         self.entries: List[dict] = []
         self.filtered_entries: List[dict] = []
         self.total_pages = 1
@@ -1678,6 +1716,14 @@ class AllCasesPage(PrivateLayoutView):
     async def initialize(self):
         await self.refresh_data()
         self.build_layout()
+
+    def pause_live(self):
+        if self.message:
+            self.cog.unregister_live_case_view(self.message.id)
+
+    def resume_live(self):
+        if self.live and self.message:
+            self.cog.register_live_case_view(self.message.id, self)
 
     async def refresh_data(self):
         self.entries = await self.cog.get_all_infractions(self.guild_id)
@@ -1715,14 +1761,25 @@ class AllCasesPage(PrivateLayoutView):
         container = discord.ui.Container()
 
         count_text = f"{len(self.filtered_entries)} Total Cases"
+        if self.live:
+            count_text += " • Live"
+
         if not self.container_header:
             header = f"## Case Log — {count_text}"
         else:
             header = f"## {self.container_header}"
 
+        live_btn = discord.ui.Button(
+            label="Disable Live Mode" if self.live else "Enable Live Mode",
+            style=discord.ButtonStyle.secondary if self.live else discord.ButtonStyle.success,
+        )
+        live_btn.callback = self.live_callback
+
         container.add_item(discord.ui.TextDisplay(header))
-        container.add_item(discord.ui.TextDisplay(
-            f"Browsing all recorded infractions. Use search to find specific Case IDs or User IDs."))
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(f"Browsing all recorded infractions. Use search to find specific Case IDs or User IDs."),
+            accessory=live_btn
+        ))
         container.add_item(discord.ui.Separator())
 
         start = (self.page - 1) * self.per_page
@@ -1747,13 +1804,12 @@ class AllCasesPage(PrivateLayoutView):
                 view_btn.callback = self.create_details_callback(case)
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=view_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         nav_row = discord.ui.ActionRow()
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
         left_btn.callback = self.prev_page
-        go_btn = discord.ui.Button(label="Go To Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=(self.total_pages <= 1))
         go_btn.callback = self.go_to_page_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1763,14 +1819,17 @@ class AllCasesPage(PrivateLayoutView):
         nav_row.add_item(go_btn)
         nav_row.add_item(right_btn)
         container.add_item(nav_row)
-
+        container.add_item(discord.ui.Separator())
         control_row = discord.ui.ActionRow()
-        search_btn = discord.ui.Button(label="Search", style=discord.ButtonStyle.primary)
-        search_btn.callback = self.search_callback
+        search_case_id_btn = discord.ui.Button(label="Search by Case ID", style=discord.ButtonStyle.primary)
+        search_case_id_btn.callback = self.search_case_id_callback
+        search_user_id_btn = discord.ui.Button(label="Search by User ID", style=discord.ButtonStyle.primary)
+        search_user_id_btn.callback = self.search_user_id_callback
         clear_btn = discord.ui.Button(label="Clear Search", style=discord.ButtonStyle.secondary,
                                       disabled=(not self.search_query))
         clear_btn.callback = self.clear_search_callback
-        control_row.add_item(search_btn)
+        control_row.add_item(search_case_id_btn)
+        control_row.add_item(search_user_id_btn)
         control_row.add_item(clear_btn)
         container.add_item(control_row)
 
@@ -1781,8 +1840,8 @@ class AllCasesPage(PrivateLayoutView):
         sort_options = [
             discord.SelectOption(label="Newest First", value=self.SORT_NEWEST),
             discord.SelectOption(label="Oldest First", value=self.SORT_OLDEST),
-            discord.SelectOption(label=f"Highest {term}", value=self.SORT_HIGHEST),
-            discord.SelectOption(label=f"Lowest {term}", value=self.SORT_LOWEST),
+            discord.SelectOption(label=f"Most {term}", value=self.SORT_HIGHEST),
+            discord.SelectOption(label=f"Least {term}", value=self.SORT_LOWEST),
             discord.SelectOption(label="Case ID (Ascending)", value=self.SORT_CASE_ASC),
             discord.SelectOption(label="Case ID (Descending)", value=self.SORT_CASE_DESC),
         ]
@@ -1794,15 +1853,20 @@ class AllCasesPage(PrivateLayoutView):
         sort_dropdown.callback = self.sort_callback
         container.add_item(discord.ui.ActionRow(sort_dropdown))
 
-        container.add_item(discord.ui.Separator())
-        return_btn = discord.ui.Button(label="Return to Dashboard", style=discord.ButtonStyle.secondary)
-        return_btn.callback = self.return_home
-        container.add_item(discord.ui.ActionRow(return_btn))
-
         self.add_item(container)
+
+    async def live_callback(self, interaction: discord.Interaction):
+        self.live = not self.live
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+        if self.live and self.message:
+            self.cog.register_live_case_view(self.message.id, self)
+        elif self.message:
+            self.cog.unregister_live_case_view(self.message.id)
 
     def create_details_callback(self, case):
         async def callback(interaction: discord.Interaction):
+            self.pause_live()
             view = CaseDetailPage(self.user, self.cog, self.guild, case, self.term)
             await interaction.response.edit_message(view=view)
             view.message = self.message
@@ -1822,7 +1886,10 @@ class AllCasesPage(PrivateLayoutView):
     async def go_to_page_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
 
-    async def search_callback(self, interaction: discord.Interaction):
+    async def search_case_id_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(CaseIDSearchModal(self))
+
+    async def search_user_id_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(CaseUserSearchModal(self))
 
     async def clear_search_callback(self, interaction: discord.Interaction):
@@ -1842,10 +1909,7 @@ class AllCasesPage(PrivateLayoutView):
         self.build_layout()
         await interaction.response.edit_message(view=self)
 
-    async def return_home(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(view=ModerationDashboard(self.user, self.cog))
-
-class Points(commands.Cog):
+class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.user_cache: Dict[str, Dict[str, Any]] = {}
@@ -1939,7 +2003,8 @@ class Points(commands.Cog):
                     msg_report_enabled INTEGER DEFAULT 0,
                     msg_report_channel INTEGER,
                     msg_report_roles TEXT,
-                    decay_log_enabled INTEGER DEFAULT 0
+                    decay_log_enabled INTEGER DEFAULT 0,
+                    show_medals INTEGER DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS infractions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1979,6 +2044,8 @@ class Points(commands.Cog):
                 await db.execute("ALTER TABLE settings ADD COLUMN msg_report_roles TEXT")
             if "decay_log_enabled" not in columns:
                 await db.execute("ALTER TABLE settings ADD COLUMN decay_log_enabled INTEGER DEFAULT 0")
+            if "show_medals" not in columns:
+                await db.execute("ALTER TABLE settings ADD COLUMN show_medals INTEGER DEFAULT 1")
 
             async with db.execute("PRAGMA table_info(users)") as cursor:
                 columns = [info[1] for info in await cursor.fetchall()]
@@ -2037,6 +2104,16 @@ class Points(commands.Cog):
                        WHERE guild_id = ? AND user_id = ?
                        ORDER BY created_at DESC''',
                     (guild_id, user_id)
+            ) as cursor:
+                return [self._row_to_infraction(row) async for row in cursor]
+
+    async def get_all_infractions(self, guild_id: int) -> List[dict]:
+        async with self.acquire_db() as db:
+            async with db.execute(
+                    "SELECT id, guild_id, case_number, user_id, moderator_id, amount, reason, "
+                    "punishment_type, punishment_duration, points_after, created_at "
+                    "FROM infractions WHERE guild_id = ? ORDER BY created_at DESC",
+                    (guild_id,)
             ) as cursor:
                 return [self._row_to_infraction(row) async for row in cursor]
 
@@ -2290,7 +2367,7 @@ class Points(commands.Cog):
                     self.action_cache[guild_id].append(action)
 
             async with db.execute(
-                    "SELECT guild_id, punishment_dm, punishment_log, decay_interval, rejoin_points, simple_mode, msg_report_enabled, msg_report_channel, msg_report_roles, decay_log_enabled FROM settings") as cursor:
+                    "SELECT guild_id, punishment_dm, punishment_log, decay_interval, rejoin_points, simple_mode, msg_report_enabled, msg_report_channel, msg_report_roles, decay_log_enabled, show_medals FROM settings") as cursor:
                 async for row in cursor:
                     self.settings_cache[row[0]] = {
                         "punishment_dm": row[1],
@@ -2301,7 +2378,8 @@ class Points(commands.Cog):
                         "msg_report_enabled": row[6],
                         "msg_report_channel": row[7],
                         "msg_report_roles": row[8],
-                        "decay_log_enabled": row[9]
+                        "decay_log_enabled": row[9],
+                        "show_medals": row[10]
                     }
 
     async def guild_setup(self, interaction: discord.Interaction):
@@ -2314,7 +2392,7 @@ class Points(commands.Cog):
                 "punishment_dm": 1, "punishment_log": 1, "simple_mode": 1,
                 "decay_interval": 14, "rejoin_points": 4,
                 "msg_report_enabled": 0, "msg_report_channel": None, "msg_report_roles": None,
-                "decay_log_enabled": 0
+                "decay_log_enabled": 0, "show_medals": 1
             }
             await self.apply_default_actions(interaction.guild.id)
         return True
@@ -3444,4 +3522,4 @@ class PunishPendingModal(discord.ui.Modal):
 
 
 async def setup(bot):
-    await bot.add_cog(Points(bot))
+    await bot.add_cog(Moderation(bot))

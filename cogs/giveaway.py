@@ -302,68 +302,63 @@ class ParticipantPaginator(discord.ui.View):
         self.show_tags = False
         self.processed_participants = processed_participants
 
-    def _process_participants(self, participants, extra_roles):
-        data = []
-        for uid in participants:
-            entries = 1
-            member = self.guild.get_member(uid) or self.guild.fetch_member(uid)
-            if member and extra_roles:
-                for role_id in extra_roles:
-                    if any(r.id == role_id for r in member.roles):
-                        entries += 1
-            data.append({'id': uid, 'entries': entries})
-
-        return sorted(data, key=lambda x: (x['entries'], x['id']), reverse=True)
-
-    def get_embed(self):
+    async def get_embed(self):
         start = self.current_page * self.per_page
         end = start + self.per_page
         page_list = self.processed_participants[start:end]
 
         lines = []
         for item in page_list:
-            user = self.bot.get_user(item['id']) or self.bot.fetch_user(item['id'])
+            user_id = item['id']
+            user = self.bot.get_user(user_id) or self.guild.get_member(user_id)
+
+            if not user:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                except Exception:
+                    user = None
+
             if user:
                 name = user.name if self.show_tags else f"<@{user.id}>"
             else:
-                name = f"Unknown({item['id']})"
+                name = f"Unknown({user_id})"
 
             lines.append(f"• **{name}** (**{item['entries']}** entries)")
 
         mentions = "\n".join(lines) or "No participants yet."
         total_pages = (len(self.processed_participants) - 1) // self.per_page + 1
         total_count = len(self.processed_participants)
-
+        self.go_to_page.label = f"Page {self.current_page + 1} of {total_pages}"
         embed = discord.Embed(
             title=f"<:dopamine:1479037593537613945> Participants for **{self.prize}**",
             description=mentions,
             color=discord.Color(0x944ae8)
         )
-        embed.set_footer(text=f"Total Participants: {total_count} | Page {self.current_page + 1} of {total_pages}")
+        embed.set_footer(text=f"Total Participants: {total_count}")
         return embed
 
     @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.primary)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_page > 0:
             self.current_page -= 1
-            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
-    @discord.ui.button(label="Go To Page", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="Page 0 of 0", style=discord.ButtonStyle.gray)
     async def go_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         total_pages = (len(self.processed_participants) - 1) // self.per_page + 1
-        await interaction.response.send_modal(GoToPageModalPaginator(self.current_page, total_pages, self))
+        await interaction.response.send_modal(GoToPageModal(self, total_pages))
 
     @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.primary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if (self.current_page + 1) * self.per_page < len(self.processed_participants):
             self.current_page += 1
-            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
     @discord.ui.button(label="Show User Tags", style=discord.ButtonStyle.gray)
     async def toggle_tags(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.show_tags = not self.show_tags
         button.label = "Show Usernames" if self.show_tags else "Show User Tags"
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
 
 class BehaviorSelect(discord.ui.Select):
@@ -685,7 +680,7 @@ class GiveawayJoinView(discord.ui.View):
             guild=interaction.guild
         )
 
-        await interaction.followup.send(embed=view.get_embed(), view=view, ephemeral=True)
+        await interaction.followup.send(embed=await view.get_embed(), view=view, ephemeral=True)
 
 
 class TemplateHomepage(PrivateLayoutView):
@@ -767,13 +762,12 @@ class MystuffPage(PrivateLayoutView):
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(
                 f"### {t['prize']}\n{desc}"), accessory=edit_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 1)
         left_btn.callback = self.prev_callback
 
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
 
@@ -794,7 +788,7 @@ class MystuffPage(PrivateLayoutView):
         row.add_item(create_btn)
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to Template Homepage", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -880,7 +874,7 @@ class EditPage(PrivateLayoutView):
 
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to My Templates", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -983,12 +977,11 @@ class BrowsePage(PrivateLayoutView):
 
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"{title}\n{desc}"), accessory=use_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1018,10 +1011,10 @@ class BrowsePage(PrivateLayoutView):
         container.add_item(row)
 
         sort_options = [
-            discord.SelectOption(label='Sort by Most Popular', value='popular'),
-            discord.SelectOption(label='Sort by Least Popular', value='unpopular'),
-            discord.SelectOption(label='Sort by Alphabetical Order', value='alpha'),
-            discord.SelectOption(label='Sort by Reversed Alphabetical Order', value='revalpha')
+            discord.SelectOption(label='Most Popular', value='popular'),
+            discord.SelectOption(label='Least Popular', value='unpopular'),
+            discord.SelectOption(label='Alphabetical (A–Z)', value='alpha'),
+            discord.SelectOption(label='Alphabetical (Z–A)', value='revalpha')
         ]
 
         for option in sort_options:
@@ -1038,7 +1031,7 @@ class BrowsePage(PrivateLayoutView):
         row.add_item(sort_dropdown)
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label=f"Return to {'Template Homepage' if self.is_th else 'Previous Page'}", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -1190,7 +1183,7 @@ class CreatewithtemplatePage(PrivateLayoutView):
 
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to Create Giveaway Page", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -1248,12 +1241,11 @@ class MystuffUse(PrivateLayoutView):
             container.add_item(
                 discord.ui.Section(discord.ui.TextDisplay(f"### {t['prize']}\n{desc}"), accessory=use_btn))
 
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 1)
         left_btn.callback = self.prev_callback
-        go_btn = discord.ui.Button(label="Go to Page", style=discord.ButtonStyle.secondary,
+        go_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary,
                                    disabled=self.total_pages <= 1)
         go_btn.callback = self.goto_callback
         right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
@@ -1266,7 +1258,7 @@ class MystuffUse(PrivateLayoutView):
         row.add_item(right_btn)
         container.add_item(row)
 
-        back_btn = discord.ui.Button(label="Return to Previous Page", style=discord.ButtonStyle.secondary)
+        back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back_btn.callback = self.back_callback
         row = discord.ui.ActionRow()
         row.add_item(back_btn)
@@ -1727,8 +1719,6 @@ class Giveaways(commands.Cog):
                     try:
                         new_count = int(w_count)
                     except ValueError:
-                        # If it's "123,456" (the role ID bug), we can't know the real count.
-                        # Default to 1 to prevent the bot from crashing.
                         new_count = 1
 
                     await db.execute(
@@ -1762,7 +1752,6 @@ class Giveaways(commands.Cog):
         """
         async with db.execute("PRAGMA table_info(giveaways)") as cursor:
             columns = await cursor.fetchall()
-            # column[1] is name, column[2] is type
             winner_role_col = next((c for c in columns if c[1] == "winner_role_id"), None)
 
             if not winner_role_col or winner_role_col[2].upper() != "TEXT":

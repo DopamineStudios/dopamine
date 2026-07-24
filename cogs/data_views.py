@@ -504,12 +504,14 @@ class RemovalFeedbackView(PrivateLayoutView):
         self.cog = cog
         self.guild_id = guild_id
         self.guild_name = guild_name
+        self.feedback_done = False
+        self.message = None
         self.build_layout()
 
     def build_layout(self):
         self.clear_items()
         container = discord.ui.Container()
-        container.add_item(discord.ui.TextDisplay("## See you next time!"))
+        container.add_item(discord.ui.TextDisplay("## See you next time!" if not self.feedback_done else "## Thank you for your feedback!"))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
             f"Would you mind sharing why your server (**{self.guild_name}**) decided to kick Dopamine?"
@@ -517,10 +519,10 @@ class RemovalFeedbackView(PrivateLayoutView):
         container.add_item(discord.ui.Separator())
         row = discord.ui.ActionRow()
         for key, label in self.REASONS.items():
-            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary)
+            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, disabled=self.feedback_done)
             btn.callback = self._make_reason(key)
             row.add_item(btn)
-        other = discord.ui.Button(label="Other", style=discord.ButtonStyle.secondary)
+        other = discord.ui.Button(label="Other", style=discord.ButtonStyle.secondary, disabled=self.feedback_done)
         other.callback = self._other
         row.add_item(other)
         container.add_item(row)
@@ -529,28 +531,41 @@ class RemovalFeedbackView(PrivateLayoutView):
     def _make_reason(self, reason: str):
         async def cb(interaction: discord.Interaction):
             await self.cog.save_removal_feedback(self.guild_id, self.guild_name, interaction.user.id, reason)
-            await interaction.response.edit_message(view=None)
-            await interaction.followup.send("Thank you for your feedback!", ephemeral=True)
+            self.feedback_done = True
+            self.build_layout()
+            await interaction.response.edit_message(view=self)
+            self.stop()
         return cb
 
     async def _other(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(RemovalFeedbackModal(self.cog, self.guild_id, self.guild_name))
+        await interaction.response.send_modal(RemovalFeedbackModal(self.cog, self.guild_id, self.guild_name, self))
+
+    async def on_timeout(self) -> None:
+        try:
+            await self.message.delete()
+        except Exception:
+            pass
+        self.stop()
 
 
 class RemovalFeedbackModal(discord.ui.Modal, title="Feedback"):
     detail = discord.ui.TextInput(label="Tell us more (optional)", required=False, max_length=500)
 
-    def __init__(self, cog, guild_id: int, guild_name: str):
+    def __init__(self, cog, guild_id: int, guild_name: str, parent_view):
         super().__init__()
         self.cog = cog
         self.guild_id = guild_id
         self.guild_name = guild_name
+        self.parent_view = parent_view
 
     async def on_submit(self, interaction: discord.Interaction):
         await self.cog.save_removal_feedback(
             self.guild_id, self.guild_name, interaction.user.id, "other", self.detail.value or None
         )
-        await interaction.response.send_message("Thank you for your feedback!", ephemeral=True)
+        self.parent_view.feedback_done = True
+        self.parent_view.build_layout()
+        await self.parent_view.message.edit(view=self.parent_view)
+        self.parent_view.stop()
 
 
 class InsightsDashboard(PrivateLayoutView):
@@ -571,16 +586,22 @@ class InsightsDashboard(PrivateLayoutView):
             f"**Last 30 days:** {stats.get('month', 0):,}\n"
             f"**All time:** {stats.get('all_time', 0):,}\n\n"
             f"**Last backup:** {stats.get('last_backup', 'Never')}\n"
-            f"**Removal feedback responses:** {stats.get('feedback_count', 0)}"
+            f"**Bot removal feedback responses:** {stats.get('feedback_count', 0)}"
         ))
         container.add_item(discord.ui.Separator())
+
         row = discord.ui.ActionRow()
         feat_btn = discord.ui.Button(label="By Feature", style=discord.ButtonStyle.primary)
         cmd_btn = discord.ui.Button(label="Top Commands", style=discord.ButtonStyle.secondary)
+        feedback_btn = discord.ui.Button(label="Bot Removal User Feedback", style=discord.ButtonStyle.secondary)
+
         feat_btn.callback = self._features
         cmd_btn.callback = self._commands
+        feedback_btn.callback = self._removal_feedback
+
         row.add_item(feat_btn)
         row.add_item(cmd_btn)
+        row.add_item(feedback_btn)
         container.add_item(row)
         self.add_item(container)
 
@@ -589,6 +610,12 @@ class InsightsDashboard(PrivateLayoutView):
 
     async def _commands(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=InsightsCommandsPage(self.cog, self.user))
+
+    async def _removal_feedback(self, interaction: discord.Interaction):
+        view = RemovalFeedbackListPage(self.cog, self.user)
+        await view.fetch_data()
+        view.build_layout()
+        await interaction.response.edit_message(view=view)
 
 
 class InsightsFeaturePage(PrivateLayoutView):
@@ -611,13 +638,14 @@ class InsightsFeaturePage(PrivateLayoutView):
         for feat_id, count in chunk:
             container.add_item(discord.ui.TextDisplay(f"### {feat_id}\n**{count:,}** total uses"))
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total}"))
         nav = discord.ui.ActionRow()
         prev_b = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
+        page_b = discord.ui.Button(label=f"Page {self.page} of {total}", style=discord.ButtonStyle.secondary, disabled=True)
         next_b = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=self.page >= total)
         prev_b.callback = self._prev
         next_b.callback = self._next
         nav.add_item(prev_b)
+        nav.add_item(page_b)
         nav.add_item(next_b)
         container.add_item(nav)
         back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary)
@@ -659,6 +687,192 @@ class InsightsCommandsPage(PrivateLayoutView):
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.ActionRow(back))
         self.add_item(container)
+
+    async def _back(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(view=InsightsDashboard(self.cog, self.user))
+
+class RemovalSearchModal(discord.ui.Modal, title="Search Feedback"):
+    query_input = discord.ui.TextInput(
+        label="Search Keyword",
+        placeholder="Server name, reason, or comment...",
+        required=False,
+        max_length=100,
+    )
+
+    def __init__(self, parent_view):
+        super().__init__()
+        self.parent_view = parent_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.parent_view.search_query = self.query_input.value.strip() or None
+        self.parent_view.page = 1
+        await self.parent_view.fetch_data()
+        self.parent_view.build_layout()
+        await interaction.response.edit_message(view=self.parent_view)
+
+
+class RemovalFeedbackListPage(PrivateLayoutView):
+    per_page = 5
+
+    def __init__(
+        self,
+        cog,
+        user,
+        page: int = 1,
+        sort_by: str = "newest",
+        search_query: str | None = None,
+    ):
+        super().__init__(user, timeout=None)
+        self.cog = cog
+        self.page = page
+        self.sort_by = sort_by
+        self.search_query = search_query
+        self.rows: list[tuple] = []
+        self.total_count = 0
+
+    async def fetch_data(self):
+        """Query the removal_feedback SQLite table dynamically based on sort & search."""
+        query = "SELECT guild_id, guild_name, responder_user_id, reason, other_text, responded_at FROM removal_feedback"
+        params: list[str] = []
+
+        if self.search_query:
+            query += " WHERE guild_name LIKE ? OR reason LIKE ? OR other_text LIKE ?"
+            like_term = f"%{self.search_query}%"
+            params.extend([like_term, like_term, like_term])
+
+        sort_sql_map = {
+            "newest": "ORDER BY responded_at DESC",
+            "oldest": "ORDER BY responded_at ASC",
+            "guild_name": "ORDER BY guild_name ASC",
+            "reason": "ORDER BY reason ASC",
+        }
+        query += f" {sort_sql_map.get(self.sort_by, 'ORDER BY responded_at DESC')}"
+
+        async with self.cog.acquire_db() as db:
+            async with db.execute(query, params) as cur:
+                self.rows = await cur.fetchall()
+
+        self.total_count = len(self.rows)
+
+    def build_layout(self):
+        self.clear_items()
+        container = discord.ui.Container()
+        container.add_item(discord.ui.TextDisplay("## Removal Feedback Responses"))
+        container.add_item(discord.ui.Separator())
+
+        status_parts = [f"**Total:** {self.total_count}", f"**Sort:** `{self.sort_by}`"]
+        if self.search_query:
+            status_parts.append(f"**Search:** `{self.search_query}`")
+        container.add_item(discord.ui.TextDisplay(" | ".join(status_parts)))
+        container.add_item(discord.ui.Separator())
+
+        total_pages = max(1, (self.total_count + self.per_page - 1) // self.per_page)
+        start = (self.page - 1) * self.per_page
+        chunk = self.rows[start : start + self.per_page]
+
+        if not chunk:
+            container.add_item(discord.ui.TextDisplay("*(No feedback entries found)*"))
+            container.add_item(discord.ui.Separator())
+        else:
+            for gid, gname, uid, reason, other, responded_at in chunk:
+                reason_label = RemovalFeedbackView.REASONS.get(reason, reason)
+                detail = f"### {gname} (`{gid}`)\n"
+                detail += f"- **Reason:** {reason_label}\n"
+                if other:
+                    detail += f"- **Notes:** {other}\n"
+                detail += f"- **Responder:** <@{uid}>\n"
+                detail += f"- **Submitted:** <t:{responded_at}:R>"
+                container.add_item(discord.ui.TextDisplay(detail))
+                container.add_item(discord.ui.Separator())
+
+        sort_select = discord.ui.Select(
+            placeholder="Change sorting option...",
+            options=[
+                discord.SelectOption(
+                    label="Newest First", value="newest", default=self.sort_by == "newest"
+                ),
+                discord.SelectOption(
+                    label="Oldest First", value="oldest", default=self.sort_by == "oldest"
+                ),
+                discord.SelectOption(
+                    label="Server Name", value="guild_name", default=self.sort_by == "guild_name"
+                ),
+                discord.SelectOption(
+                    label="Reason", value="reason", default=self.sort_by == "reason"
+                ),
+            ],
+        )
+        sort_select.callback = self._on_sort_change
+        container.add_item(discord.ui.ActionRow(sort_select))
+
+        filter_row = discord.ui.ActionRow()
+        search_btn = discord.ui.Button(
+            label="Search Filter", style=discord.ButtonStyle.secondary
+        )
+        search_btn.callback = self._on_search
+        filter_row.add_item(search_btn)
+
+        if self.search_query:
+            clear_btn = discord.ui.Button(
+                label="Clear Search", style=discord.ButtonStyle.secondary
+            )
+            clear_btn.callback = self._on_clear_search
+            filter_row.add_item(clear_btn)
+
+        container.add_item(filter_row)
+
+        nav_row = discord.ui.ActionRow()
+        prev_b = discord.ui.Button(
+            emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1
+        )
+        page_b = discord.ui.Button(
+            label=f"Page {self.page} of {total_pages}",
+            style=discord.ButtonStyle.secondary,
+            disabled=True,
+        )
+        next_b = discord.ui.Button(
+            emoji="▶️", style=discord.ButtonStyle.primary, disabled=self.page >= total_pages
+        )
+        prev_b.callback = self._prev
+        next_b.callback = self._next
+        nav_row.add_item(prev_b)
+        nav_row.add_item(page_b)
+        nav_row.add_item(next_b)
+        container.add_item(nav_row)
+
+        back_btn = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary)
+        back_btn.callback = self._back
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(back_btn))
+
+        self.add_item(container)
+
+    async def _on_sort_change(self, interaction: discord.Interaction):
+        self.sort_by = interaction.data["values"][0]
+        self.page = 1
+        await self.fetch_data()
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def _on_search(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(RemovalSearchModal(self))
+
+    async def _on_clear_search(self, interaction: discord.Interaction):
+        self.search_query = None
+        self.page = 1
+        await self.fetch_data()
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def _prev(self, interaction: discord.Interaction):
+        self.page -= 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
+
+    async def _next(self, interaction: discord.Interaction):
+        self.page += 1
+        self.build_layout()
+        await interaction.response.edit_message(view=self)
 
     async def _back(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=InsightsDashboard(self.cog, self.user))

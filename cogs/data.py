@@ -732,7 +732,8 @@ class Data(commands.Cog):
         try:
             user = await self.bot.fetch_user(inviter_id)
             view = RemovalFeedbackView(self, user, guild.id, guild.name)
-            await user.send(view=view)
+            msg = await user.send(view=view)
+            view.message = msg
         except (discord.Forbidden, discord.HTTPException, discord.NotFound):
             pass
         for cog in self.iter_data_cogs():
