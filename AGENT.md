@@ -8,11 +8,10 @@ Welcome to the **Dopamine** Discord bot codebase. This document serves as the au
 
 1. **Database Engine:** [`Turso`](https://turso.tech) (SQLite-compatible) persistence layer via [`pyturso`](requirements.txt:1). Local file database stored at [`databases/dopamine.db`](config.py:29) with optional remote replication sync urls (`TURSO_DATABASE_URL`).
 2. **Connection Management:** A single, shared database connection instance (`DatabaseManager` in [`utils/database.py`](utils/database.py:74)) managed thread-safely using `asyncio.Lock()` and `asyncio.Event()`.
-3. **Centralized Data Access:** All SQL queries and database operations must be executed exclusively through [`DatabaseManager`](utils/database.py:74) methods (`execute`, `execute_write`).
-4. **Cogs Integration Rule:** Cogs must **directly** call methods on `DatabaseManager` (`self.bot.db.execute(...)` or `self.bot.db.execute_write(...)`. OR you can also use ` self.bot.db.acquire_db(...)` if you need to execute multiple multiple database queries or statements sequentially within the exact same locked transaction session, whereas the previous two are designed for single, atomic SQL statements). 
-   - ❌ **NO custom wrapper methods** in cogs or helpers.
-   - ❌ **NO local connection acquisition helpers** (e.g. `acquire_db`).
-   - ❌ **NO duplicate query logic**.
+3. **Centralized Data Access:** All SQL queries and database operations must be executed through [`DatabaseManager`](utils/database.py:74) methods (`execute`, `execute_write`), either directly or via shared query abstractions/helpers in [`utils/`](utils/) for endpoints shared between cogs and FastAPI routers.
+4. **Cogs & API Integration Rule:** Cogs and FastAPI routers may call `DatabaseManager` methods directly or use shared helper functions in [`utils/`](utils/) to avoid query duplication. 
+   - ❌ **NO direct raw `sqlite3` imports or connections.**
+   - ❌ **NO local connection acquisition helpers** outside [`DatabaseManager`](utils/database.py:74).
 4. **User & Server Data Manager:** Ensure that new types of user and server data is exposed through the data manager (`cogs/data.py`).
 ---
 
