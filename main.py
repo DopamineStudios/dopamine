@@ -74,19 +74,37 @@ async def get_message_id(interaction: discord.Interaction, message: discord.Mess
         ephemeral=True
     )
 
+import uvicorn
+from api.server import api_app
+
 if __name__ == "__main__":
     async def main_async():
         try:
             await bot.db.connect()
             await bot.db.ensure_schema()
+            
+            # Set db state for FastAPI
+            api_app.state.db = bot.db
+            
+            # Start Uvicorn API server task
+            config = uvicorn.Config(api_app, host="0.0.0.0", port=8000, log_level="info")
+            server = uvicorn.Server(config)
+            api_task = asyncio.create_task(server.serve())
+            
             sync_task = asyncio.create_task(bot.db.start_periodic_sync(300.0))
             try:
                 async with bot:
                     await bot.start(TOKEN)
             finally:
                 sync_task.cancel()
+                server.should_exit = True
+                api_task.cancel()
                 try:
                     await sync_task
+                except asyncio.CancelledError:
+                    pass
+                try:
+                    await api_task
                 except asyncio.CancelledError:
                     pass
                 await bot.db.close()
