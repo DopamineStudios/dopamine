@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loading Changelog...</title>
+  <link rel="icon" type="image/ico" href="favico.ico">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      margin: 0; 
+      min-height: 100vh;
+    }
+
+    .bg-gradient {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(135deg, #2c1a4d 0%, #161b44 50%, var(--bg-primary) 100%);
+      opacity: 0.6; z-index: -2;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    body > .container {
+      max-width: 800px;
+      padding-top: 120px;
+    }
+
+    #content {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      padding: 40px;
+      border-radius: 32px;
+      backdrop-filter: blur(20px);
+      line-height: 1.6;
+    }
+
+    #content h1, #content h2 { font-family: 'Bebas Neue', sans-serif;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;}
+    #content h3 { font-family: 'Bebas Neue', sans-serif;
+      letter-spacing: 1px;
+      background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;}
+    #content h1 { font-size: 2rem; margin-bottom: 20px; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px; }
+    #content ul { padding-left: 20px; margin-bottom: 20px; }
+    #content li { margin-bottom: 5px; color: var(--text-primary); }
+    #content code { background: rgba(106, 64, 126, 0.4); padding: 2px 6px; border-radius: 4px; color: var(--accent-pink); font-size: 0.9em; }
+    #content strong, #content b {
+      font-weight: 700;
+      color: #ffffff;
+    }
+    #content p {
+      color: #ffffff;
+      margin-top: 10px;
+      margin-bottom: 14px;
+    }
+    #content sub, small {
+      font-size: 0.75em;
+      color: rgba(255, 255, 255, 0.75);
+      vertical-align: sub;
+    }
+
+    #content a {
+      color: #b355ff !important;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 2px;
+      transition: color 0.2s ease;
+    }
+
+    #content a:hover {
+      color: #813ab4 !important;
+    }
+
+    @media (max-width: 768px) {
+      #content h1 {
+        font-size: 1.75rem;
+        margin-bottom: 15px;
+      }
+
+      #content h2 {
+        font-size: 1.5rem;
+      }
+
+      #content {
+        padding: 24px;
+        overflow-x: auto;
+      }
+
+      #content table {
+        font-size: 0.85rem;
+      }
+
+      #content th,
+      #content td {
+        padding: 8px 10px;
+      }
+    }
+    .changelog-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .nav-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    #version-display {
+      font-family: 'Inter', sans-serif;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin: 0;
+    }
+
+    .back-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, var(--accent-pink), var(--accent-pinkkk));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-decoration: none !important;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .arrow-icon {
+      display: flex;
+      align-items: center;
+      transition: transform 0.3s ease;
+      color: var(--accent-pink);
+    }
+
+    .back-link:hover .arrow-icon {
+      transform: translateX(-5px);
+    }
+
+    .back-link:hover {
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+
+
+
+  <div class="container">
+    <div class="nav-nav">
+      <a href="changelog.html" class="back-link">
+        <span class="arrow-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+        </span>
+        All Releases
+      </a>
+      <span id="version-display" style="color: var(--text-secondary)">Version 3.9.0</span>
+    </div>
+
+    <div id="content">Loading changelog...</div>
+  </div>
+
+
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const version = urlParams.get('v');
+
+    if (version) {
+      document.title = `v${version} Dopamine - Changelog`;
+      document.getElementById('version-display').innerText = `Version ${version}`;
+
+      fetch(`./changelogs/${version}.md`)
+        .then(response => {
+          if (!response.ok) throw new Error('Version not found');
+          return response.text();
+        })
+        .then(markdown => {
+          document.getElementById('content').innerHTML = marked.parse(markdown);
+        })
+        .catch(err => {
+          document.getElementById('content').innerHTML = `<h2>Error</h2><p>Could not load the changelog for v${version}.</p>`;
+        });
+    }
+  </script>
+
+<script src="components.js"></script>
+</body>
+</html>

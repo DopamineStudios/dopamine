@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dopamine - Changelog</title>
+  <link rel="icon" type="image/ico" href="favico.ico">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    .bg-gradient {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(135deg, #2c1a4d 0%, #161b44 50%, var(--bg-primary) 100%);
+      opacity: 0.6; z-index: -2;
+    }
+
+    .container {
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    body > .container {
+      padding-top: 120px;
+      max-width: 800px;
+    }
+
+    h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 4rem;
+      letter-spacing: 4px;
+      background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+
+    .changelog-list { display: flex; flex-direction: column; gap: 14px; }
+
+    .version-card {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 24px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      text-decoration: none;
+      color: inherit;
+      transition: all 0.3s ease;
+    }
+
+    .version-info h3 {
+      font-size: 1.2rem;
+      margin-bottom: 6px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .version-info p { color: var(--text-secondary); font-size: 0.9rem; }
+
+    .badge {
+      padding: 4px 12px;
+      border-radius: 50px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: var(--accent-purple);
+      display: none;
+    }
+    .version-card:hover {
+      border-color: rgb(149, 83, 250);
+      background: rgba(255, 255, 255, 0.08);
+      transform: translateX(5px);
+
+      box-shadow: 0 10px 20px rgba(160, 78, 248, 0.2);
+    }
+    .version-card:first-child .badge { display: block; background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple)); }
+    
+    .back-home {
+        display: block; text-align: center; margin-bottom: 20px;
+        color: var(--accent-pink); text-decoration: none; font-weight: 500;
+    }
+
+    .version-action {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .arrow {
+      font-size: 2.0rem;
+      color: rgb(141, 84, 255);
+      transition: transform 0.3s ease;
+      opacity: 0.6;
+    }
+
+    .version-card:hover .arrow {
+      transform: translateX(5px);
+      opacity: 1;
+    }
+
+    .badge {
+      margin-left: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>RELEASES</h1>
+
+    <div class="changelog-list">
+      <a href="version.html?v=4.4.0" class="version-card">
+        <div class="version-info">
+          <h3>v4.4.0 - The Datadash Update</h3>
+          <p>Released on 17 August 2026</p>
+        </div>
+        <div class="version-action">
+        <span class="badge">LATEST</span>
+          <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+        </div>
+      </a>
+      <a href="version.html?v=4.3.0" class="version-card">
+        <div class="version-info">
+          <h3>v4.3.0 - The Updates' Update?</h3>
+          <p>Released on 1 August 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+      <a href="version.html?v=4.2.0" class="version-card">
+        <div class="version-info">
+          <h3>v4.2.0 - The UI Update</h3>
+          <p>Released on 24 July 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+      <a href="version.html?v=4.1.0" class="version-card">
+        <div class="version-info">
+          <h3>v4.1.0 - An update so generic that we can't name it (and that's a good thing)</h3>
+          <p>Released on 18 July 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+      <a href="version.html?v=4.0.0" class="version-card">
+        <div class="version-info">
+          <h3>v4.0.0 - The SuiteCASE Update</h3>
+          <p>Released on 1 July 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+      <a href="version.html?v=3.9.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.9.0 - Improved Sticky Messages and Repeating Messages!</h3>
+          <p>Released on 28 March 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.8.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.8.0 - Improved Giveaway Experience!</h3>
+          <p>Released on 27 March 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.7.1" class="version-card">
+        <div class="version-info">
+          <h3>v3.7.1 Patch</h3>
+          <p>Released on 22 March 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.7.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.7.0 - New AFK Feature!</h3>
+          <p>Released on 15 March 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.6.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.6.0 - Ask Dopamine!</h3>
+          <p>Released on 5 March 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+      <a href="version.html?v=3.5.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.5.0 - The Autoresponse and Embed Update</h3>
+          <p>Released on 25 February 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.4.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.4.0 - Daily Words, Updated DiscordPhone.</h3>
+          <p>Released on 23 February 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+      <a href="version.html?v=3.3.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.3.0 - The DiscordPhone Update</h3>
+          <p>Released on 22 February 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.2.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.2.0 - Message Reporting, Selfpurge, and Bug Fixes.</h3>
+          <p>Released on 22 February 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.1.0" class="version-card">
+        <div class="version-info">
+          <h3>v3.1.0 - Factorial & Autopublish Features, Bug Fixes.</h3>
+          <p>Released on 19 February 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=3.0.0" class="version-card">
+      <div class="version-info">
+        <h3>v3.0.0 - Dopamine, Reborn.</h3>
+        <p>Released on 17 February 2026</p>
+      </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.21.4" class="version-card">
+        <div class="version-info">
+          <h3>v2.21.4</h3>
+          <p>Released on [Info lost in a blackhole]</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.21.3" class="version-card">
+        <div class="version-info">
+          <h3>v2.21.3</h3>
+          <p>Released on 2 January 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.21.2" class="version-card">
+        <div class="version-info">
+          <h3>v2.21.2</h3>
+          <p>Released on 2 January 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.21.1" class="version-card">
+        <div class="version-info">
+          <h3>v2.21.1</h3>
+          <p>Released on 2 January 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.21.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.21.0</h3>
+          <p>Released on 2 January 2026</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.20.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.20.0</h3>
+          <p>Released on 3 December 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.19.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.19.0</h3>
+          <p>Released on 3 December 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.18.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.18.0</h3>
+          <p>Released on 2 December 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.17.1" class="version-card">
+        <div class="version-info">
+          <h3>v2.17.1</h3>
+          <p>Released on 2 December 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+
+      <a href="version.html?v=2.17.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.17.0</h3>
+          <p>Released on 1 December 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.16.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.16.0</h3>
+          <p>Released on 30 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.15.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.15.0</h3>
+          <p>Released on 29 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.14.2" class="version-card">
+        <div class="version-info">
+          <h3>v2.14.2</h3>
+          <p>Released on 10 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.14.1" class="version-card">
+        <div class="version-info">
+          <h3>v2.14.1</h3>
+          <p>Released on 10 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.14.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.14.0</h3>
+          <p>Released on 9 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.13.4" class="version-card">
+        <div class="version-info">
+          <h3>v2.13.4</h3>
+          <p>Released on 8 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.13.3" class="version-card">
+        <div class="version-info">
+          <h3>v2.13.3</h3>
+          <p>Released on 8 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.13.2" class="version-card">
+        <div class="version-info">
+          <h3>v2.13.2</h3>
+          <p>Released on 8 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.13.1" class="version-card">
+        <div class="version-info">
+          <h3>v2.13.1</h3>
+          <p>Released on 8 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.13.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.13.0</h3>
+          <p>Released on 8 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.12.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.12.0</h3>
+          <p>Released on 8 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.11.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.11.0</h3>
+          <p>Released on 8 November 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.10.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.10.0</h3>
+          <p>Released on 30 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.9.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.9.0</h3>
+          <p>Released on 28 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.8.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.8.0</h3>
+          <p>Released on 28 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.7.3" class="version-card">
+        <div class="version-info">
+          <h3>v2.7.3</h3>
+          <p>Released on 25 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.7.2" class="version-card">
+        <div class="version-info">
+          <h3>v2.7.2</h3>
+          <p>Released on 25 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.7.1" class="version-card">
+        <div class="version-info">
+          <h3>v2.7.1</h3>
+          <p>Released on 25 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.7.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.7.0</h3>
+          <p>Released on 25 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.6.1" class="version-card">
+        <div class="version-info">
+          <h3>v2.6.1</h3>
+          <p>Released on 24 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.6.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.6.0</h3>
+          <p>Released on 24 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.5.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.5.0</h3>
+          <p>Released on 23 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.4.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.4.0</h3>
+          <p>Released on 22 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.3.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.3.0</h3>
+          <p>Released on 22 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.2.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.2.0</h3>
+          <p>Released on 21 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+      <a href="version.html?v=2.1.0" class="version-card">
+        <div class="version-info">
+          <h3>v2.1.0</h3>
+          <p>Released on 17 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+        <a href="version.html?v=2.0.0" class="version-card">
+          <div class="version-info">
+            <h3>v2.0.0</h3>
+            <p>Released on 17 October 2025</p>
+          </div>
+          <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+        </a>
+
+      <a href="version.html?v=1.0.0" class="version-card">
+        <div class="version-info">
+          <h3>v1.0.0 - Initial Release</h3>
+          <p>Released on 16 October 2025</p>
+        </div>
+        <span class="arrow">
+  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="0" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+</span>
+      </a>
+
+
+    </div>
+  </div>
+
+<script src="components.js"></script>
+</body>
+</html>

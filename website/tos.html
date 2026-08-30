@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dopamine - Terms of Service</title>
+  <link rel="icon" type="image/ico" href="favico.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <meta name="theme-color" content="#e14ffd">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="legal-page">
+<div class="container legal-container">
+  <a href="index.html" class="back-link">
+      <span class="arrow-icon">
+        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+      </span>
+    Back to Dopamine
+  </a>
+  <div id="content">Loading terms of service...</div>
+</div>
+
+<script>
+  fetch('./TERMS_OF_SERVICE.md')
+          .then(response => {
+            if (!response.ok) throw new Error('Terms Of Service not found');
+            return response.text();
+          })
+          .then(markdown => {
+            document.getElementById('content').innerHTML = marked.parse(markdown);
+          })
+          .catch(() => {
+            document.getElementById('content').innerHTML = '<h2>Error</h2><p>Could not load the terms of service.</p>';
+          });
+</script>
+<script src="components.js"></script>
+</body>
+</html>
