@@ -3,7 +3,6 @@ import sqlite3
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException as StarletteHTTPException
 from api.routes import moderation
@@ -17,8 +16,6 @@ async def lifespan(app: FastAPI):
         await session.close()
 
 api_app = FastAPI(title="Dopamine Bot API", lifespan=lifespan)
-
-api_app.mount("/dash", StaticFiles(directory="website/dashboard", html=True), name="dashboard")
 
 api_app.add_middleware(
     CORSMiddleware,
