@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dopamine Dashboard - Server Hub</title>
+    <link rel="icon" type="image/ico" href="../favico.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/toast.css">
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    <div class="bg-noise"></div>
+
+    <div class="dash-wrapper">
+        <div class="dash-header" id="serverHeader">
+            <div class="dash-title">
+                <h1>Server Hub</h1>
+                <p>Manage bot modules and configuration settings</p>
+            </div>
+            <button id="logoutBtn" class="btn-logout">Logout</button>
+        </div>
+
+        <div class="glass-card">
+            <h3 style="margin-top: 0; font-family: 'Bebas Neue'; font-size: 1.6rem; letter-spacing: 1px;">Available Modules</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Configure moderation, escalation thresholds, case logs, and automated protection features.</p>
+
+            <div class="module-grid">
+                <div class="module-card" id="modCard" style="cursor: pointer;">
+                    <div>
+                        <h3>Moderation & Escalation</h3>
+                        <p>Configure automated escalation, custom action thresholds, points decay, message reporting, and case management.</p>
+                    </div>
+                    <button class="btn-dash" style="width: auto; align-self: flex-start;">Configure Module</button>
+                </div>
+
+                <div class="module-card" style="opacity: 0.6; cursor: not-allowed;">
+                    <div>
+                        <h3>Giveaways & Templates (Soon)</h3>
+                        <p>Manage server giveaways, requirements, winner selection, and reusable configuration templates.</p>
+                    </div>
+                    <span style="font-size: 0.85rem; color: var(--accent-pink); font-weight: 600;">Coming Soon</span>
+                </div>
+
+                <div class="module-card" style="opacity: 0.6; cursor: not-allowed;">
+                    <div>
+                        <h3>Starboard & Skullboard (Soon)</h3>
+                        <p>Configure star thresholds, starboard channels, and viral message curation boards.</p>
+                    </div>
+                    <span style="font-size: 0.85rem; color: var(--accent-pink); font-weight: 600;">Coming Soon</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/toast.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/guild.js"></script>
+    <script src="js/pages/hub.js"></script>
+</body>
+</html>

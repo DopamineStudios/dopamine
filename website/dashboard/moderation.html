@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dopamine Dashboard - Moderation Management</title>
+    <link rel="icon" type="image/ico" href="../favico.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/toast.css">
+    <style>
+        .tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 12px;
+        }
+        .tab-btn {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            padding: 10px 20px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .tab-btn.active {
+            background: linear-gradient(135deg, var(--accent-hott-pink), var(--accent-purple));
+            color: var(--text-primary);
+            border-color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    <div class="bg-noise"></div>
+
+    <div class="dash-wrapper">
+        <div class="breadcrumb">
+            <a href="index.html">Servers</a> > 
+            <a href="server.html">Server Hub</a> > 
+            <span>Moderation</span>
+        </div>
+
+        <div class="dash-header">
+            <div class="dash-title">
+                <h1>Moderation & Escalation</h1>
+                <p>Manage automatic points/warnings escalation, custom actions, and infraction cases</p>
+            </div>
+            <button id="logoutBtn" class="btn-logout">Logout</button>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="tabSettings">Settings</button>
+            <button class="tab-btn" data-tab="tabActions">Custom Actions</button>
+            <button class="tab-btn" data-tab="tabCases">Case Log</button>
+            <button class="tab-btn" data-tab="tabPending">Pending Punishments</button>
+        </div>
+
+        <!-- TAB 1: SETTINGS -->
+        <div id="tabSettings" class="tab-content glass-card">
+            <h3 style="margin-top: 0; font-family: 'Bebas Neue'; font-size: 1.6rem; letter-spacing: 1px;">Moderation Configuration</h3>
+            
+            <div class="toggle-wrapper">
+                <div class="toggle-info">
+                    <h4>Simple Mode</h4>
+                    <p>Replaces "points" with "warnings" and sets up a standard 5-strike warning preset.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="simple_mode">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-wrapper">
+                <div class="toggle-info">
+                    <h4>Punishment DMs</h4>
+                    <p>Sends a direct message to users when they receive an infraction or punishment.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="punishment_dm">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-wrapper">
+                <div class="toggle-info">
+                    <h4>Mod Logs</h4>
+                    <p>Logs moderation actions to the configured server logging channel.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="punishment_log">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-wrapper">
+                <div class="toggle-info">
+                    <h4>Decay Logs</h4>
+                    <p>Logs point/warning decay summaries to the logging channel.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="decay_log_enabled">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-wrapper">
+                <div class="toggle-info">
+                    <h4>Show Medals</h4>
+                    <p>Displays ranking medals (🥇, 🥈, 🥉) in active infraction leaderboards.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="show_medals">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px;">
+                <div class="form-group">
+                    <label for="decay_interval">Decay Frequency (Days)</label>
+                    <input type="number" id="decay_interval" class="form-control" min="0" max="100">
+                    <small style="color: var(--text-secondary); margin-top: 4px; display: block;">Days before 1 point/warning decays (0 to disable).</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="rejoin_points">Rejoin Points</label>
+                    <input type="number" id="rejoin_points" class="form-control" min="-1" max="50">
+                    <small style="color: var(--text-secondary); margin-top: 4px; display: block;">Points given upon rejoining after ban (-1 to preserve).</small>
+                </div>
+            </div>
+
+            <h4 style="margin: 32px 0 16px; font-family: 'Bebas Neue'; font-size: 1.4rem;">Message Reporting Configuration</h4>
+            
+            <div class="toggle-wrapper">
+                <div class="toggle-info">
+                    <h4>Enable Message Reporting</h4>
+                    <p>Allows users to report messages directly to server moderators via context menu.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="msg_report_enabled">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 20px;">
+                <div class="form-group">
+                    <label for="msg_report_channel">Report Channel ID</label>
+                    <input type="text" id="msg_report_channel" class="form-control" placeholder="123456789012345678">
+                </div>
+                <div class="form-group">
+                    <label for="msg_report_roles">Ping Role IDs (Comma-separated)</label>
+                    <input type="text" id="msg_report_roles" class="form-control" placeholder="123..., 456...">
+                </div>
+            </div>
+
+            <button id="saveMsgReportBtn" class="btn-dash" style="width: auto; margin-top: 16px;">Save Settings</button>
+        </div>
+
+        <!-- TAB 2: ACTIONS -->
+        <div id="tabActions" class="tab-content glass-card" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0; font-family: 'Bebas Neue'; font-size: 1.6rem; letter-spacing: 1px;">Custom Escalation Actions</h3>
+                <button id="openCreateActionModal" class="btn-dash" style="width: auto;">Create New Action</button>
+            </div>
+
+            <table class="dash-table">
+                <thead>
+                    <tr>
+                        <th>Threshold</th>
+                        <th>Action Type</th>
+                        <th>Duration</th>
+                        <th>Manage</th>
+                    </tr>
+                </thead>
+                <tbody id="actionsTableBody">
+                    <tr><td colspan="4" style="text-align: center;">Loading actions...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- TAB 3: CASES -->
+        <div id="tabCases" class="tab-content glass-card" style="display: none;">
+            <h3 style="margin-top: 0; font-family: 'Bebas Neue'; font-size: 1.6rem; letter-spacing: 1px;">Recorded Infraction Cases</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">All recorded infraction cases for this server.</p>
+
+            <table class="dash-table">
+                <thead>
+                    <tr>
+                        <th>Case #</th>
+                        <th>User ID</th>
+                        <th>Moderator ID</th>
+                        <th>Amount</th>
+                        <th>Reason</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="infractionsTableBody">
+                    <tr><td colspan="6" style="text-align: center;">Loading infractions...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- TAB 4: PENDING -->
+        <div id="tabPending" class="tab-content glass-card" style="display: none;">
+            <h3 style="margin-top: 0; font-family: 'Bebas Neue'; font-size: 1.6rem; letter-spacing: 1px;">Pending Punishments</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">Active pending punishments queue.</p>
+
+            <table class="dash-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>User ID</th>
+                        <th>Moderator ID</th>
+                        <th>Reason</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="pendingTableBody">
+                    <tr><td colspan="5" style="text-align: center;">Loading pending punishments...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- CREATE ACTION MODAL -->
+    <div id="actionModal" class="modal-overlay">
+        <div class="modal-card">
+            <h3>Create Escalation Action</h3>
+            
+            <div class="form-group">
+                <label for="newActionType">Action Type</label>
+                <select id="newActionType" class="form-control">
+                    <option value="warning">Warning</option>
+                    <option value="timeout">Timeout</option>
+                    <option value="kick">Kick</option>
+                    <option value="ban">Ban</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="newActionDuration">Duration (Seconds, e.g. 3600 for 1h, 0 for perm)</label>
+                <input type="number" id="newActionDuration" class="form-control" value="0" min="0">
+            </div>
+
+            <div class="form-group">
+                <label for="newActionPoints">Points / Warnings Threshold</label>
+                <input type="number" id="newActionPoints" class="form-control" min="1" max="1000" placeholder="1">
+            </div>
+
+            <div class="modal-actions">
+                <button id="cancelActionModal" class="btn-secondary-dash">Cancel</button>
+                <button id="submitActionBtn" class="btn-dash" style="width: auto;">Create Action</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/toast.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/guild.js"></script>
+    <script src="js/pages/moderation.js"></script>
+</body>
+</html>
