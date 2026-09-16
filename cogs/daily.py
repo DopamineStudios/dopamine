@@ -263,9 +263,10 @@ class DailyCats(commands.Cog):
             try:
                 parsed_time = datetime.fromisoformat(rows[0]["value"])
                 if parsed_time <= datetime.now():
-                    logger.warning(f"Stored next_send_time ({parsed_time}) is in the past. Resetting to next schedule.")
-                    now = datetime.now()
-                    self.next_send_time = datetime.combine(now.date() + timedelta(days=1), time(0, 0))
+                    logger.warning(f"Stored next_send_time ({parsed_time}) is in the past. Catching up schedule.")
+                    self.next_send_time = parsed_time
+                    while self.next_send_time <= datetime.now():
+                        self.next_send_time += timedelta(hours=23)
                     await self.save_next_time()
                 else:
                     self.next_send_time = parsed_time
@@ -423,11 +424,10 @@ class DailyCats(commands.Cog):
 
             await asyncio.gather(*(send_to_channel(cid) for cid in list(self.active_cat_channels)))
 
-            self.next_send_time = self.next_send_time + timedelta(days=1)
+            self.next_send_time = self.next_send_time + timedelta(hours=23)
             while self.next_send_time <= datetime.now():
-                self.next_send_time = self.next_send_time + timedelta(days=1)
+                self.next_send_time = self.next_send_time + timedelta(hours=23)
             await self.save_next_time()
-            logger.info(f"Daily cat pictures sent successfully. Next send scheduled at {self.next_send_time}")
 
     daily = app_commands.Group(name="daily", description="Daily automated messages.")
 
