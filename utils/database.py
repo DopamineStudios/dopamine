@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
@@ -44,68 +43,6 @@ class DatabaseManager:
         await self.conn.commit()
 
     async def ensure_schema(self):
-        # Migrate old star_posts table if legacy column exists within a transaction
-        try:
-            cursor = await self.conn.execute("PRAGMA table_info(star_posts);")
-            rows = await cursor.fetchall()
-            cols = [row[1] for row in rows]
-            if cols and "starboard_message_id" in cols and "status_message_id" not in cols:
-                await self.conn.execute("BEGIN TRANSACTION;")
-                try:
-                    await self.conn.execute("""
-                        CREATE TABLE star_posts_new (
-                            guild_id INTEGER NOT NULL,
-                            source_message_id INTEGER NOT NULL,
-                            status_message_id INTEGER NOT NULL,
-                            forwarded_message_id INTEGER NOT NULL,
-                            PRIMARY KEY (guild_id, source_message_id)
-                        );
-                    """)
-                    await self.conn.execute("""
-                        INSERT OR IGNORE INTO star_posts_new (guild_id, source_message_id, status_message_id, forwarded_message_id)
-                        SELECT guild_id, source_message_id, starboard_message_id, starboard_message_id FROM star_posts;
-                    """)
-                    await self.conn.execute("DROP TABLE star_posts;")
-                    await self.conn.execute("ALTER TABLE star_posts_new RENAME TO star_posts;")
-                    await self.conn.commit()
-                except Exception as e:
-                    await self.conn.execute("ROLLBACK;")
-                    logging.error(f"Failed to migrate star_posts table: {e}")
-                    raise
-        except Exception as e:
-            logging.debug(f"star_posts migration check skipped or failed: {e}")
-
-        # Migrate old skull_posts table if legacy column exists within a transaction
-        try:
-            cursor = await self.conn.execute("PRAGMA table_info(skull_posts);")
-            rows = await cursor.fetchall()
-            cols = [row[1] for row in rows]
-            if cols and "skullboard_message_id" in cols and "status_message_id" not in cols:
-                await self.conn.execute("BEGIN TRANSACTION;")
-                try:
-                    await self.conn.execute("""
-                        CREATE TABLE skull_posts_new (
-                            guild_id INTEGER NOT NULL,
-                            source_message_id INTEGER NOT NULL,
-                            status_message_id INTEGER NOT NULL,
-                            forwarded_message_id INTEGER NOT NULL,
-                            PRIMARY KEY (guild_id, source_message_id)
-                        );
-                    """)
-                    await self.conn.execute("""
-                        INSERT OR IGNORE INTO skull_posts_new (guild_id, source_message_id, status_message_id, forwarded_message_id)
-                        SELECT guild_id, source_message_id, skullboard_message_id, skullboard_message_id FROM skull_posts;
-                    """)
-                    await self.conn.execute("DROP TABLE skull_posts;")
-                    await self.conn.execute("ALTER TABLE skull_posts_new RENAME TO skull_posts;")
-                    await self.conn.commit()
-                except Exception as e:
-                    await self.conn.execute("ROLLBACK;")
-                    logging.error(f"Failed to migrate skull_posts table: {e}")
-                    raise
-        except Exception as e:
-            logging.debug(f"skull_posts migration check skipped or failed: {e}")
-
         schema_sql = """
             -- moderation.py tables (collision renames applied)
             CREATE TABLE IF NOT EXISTS moderation_users (
@@ -169,7 +106,7 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_infractions_guild_user ON infractions(guild_id, user_id);
             CREATE INDEX IF NOT EXISTS idx_infractions_guild_case ON infractions(guild_id, case_number);
 
-            -- discordphone.py tables (collision renames applied)
+            -- discordphone.py tables
             CREATE TABLE IF NOT EXISTS discordphone_users (
                 id INTEGER PRIMARY KEY, reported INTEGER DEFAULT 0, created INTEGER DEFAULT 0, warned INTEGER DEFAULT 0
             );
@@ -228,7 +165,7 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_star_posts_forwarded ON star_posts(forwarded_message_id);
             CREATE INDEX IF NOT EXISTS idx_star_votes_user ON star_votes(guild_id, user_id);
 
-            -- skullboard.py tables (collision renames applied)
+            -- skullboard.py tables
             CREATE TABLE IF NOT EXISTS skullboard_guild_settings (
                 guild_id INTEGER PRIMARY KEY,
                 skull_threshold INTEGER DEFAULT 3,

@@ -1,11 +1,11 @@
 import asyncio
+import logging
 import time
 from collections import deque
 from typing import Optional, Dict, Set
 
 import discord
 from beacon import PrivateLayoutView, beacon_commands
-from discord import app_commands
 from discord.ext import commands, tasks
 
 from utils.data_handlers import export_table
@@ -515,20 +515,39 @@ class StarboardCog(commands.Cog):
 
             if existing_ids:
                 status_id, fwd_id = existing_ids
-                try:
-                    status_msg = await sbc.fetch_message(status_id)
-                    await status_msg.edit(content=content_str)
-                except discord.NotFound:
-                    # Recreate status message and forwarded message if missing
+                is_legacy = (status_id == fwd_id)
+                status_msg = None
+                fwd_msg = None
+
+                if not is_legacy:
+                    try:
+                        status_msg = await sbc.fetch_message(status_id)
+                        await status_msg.edit(content=content_str)
+                    except discord.NotFound:
+                        is_legacy = True
+
+                    try:
+                        fwd_msg = await sbc.fetch_message(fwd_id)
+                    except discord.NotFound:
+                        is_legacy = True
+
+                if is_legacy:
+                    for mid in (status_id, fwd_id):
+                        try:
+                            bm = await sbc.fetch_message(mid)
+                            await bm.delete()
+                        except Exception:
+                            pass
                     status_msg = await sbc.send(content=content_str)
-                    fwd_msg = await sbc.send(reference=msg, mention_author=False)
+                    fwd_msg = await msg.forward(destination=sbc)
                     await self.upsert_star_post(guild.id, msg.id, status_msg.id, fwd_msg.id)
             else:
                 status_msg = await sbc.send(content=content_str)
-                fwd_msg = await sbc.send(reference=msg, mention_author=False)
+                fwd_msg = await msg.forward(destination=sbc)
                 await self.upsert_star_post(guild.id, msg.id, status_msg.id, fwd_msg.id)
 
         except Exception as e:
+            logging.error(f"Starboard error: {e}", exc_info=True)
             if is_access_error(e):
                 await report_access_failure(self.bot, guild.id, "starboard", str(sb_id))
         finally:
@@ -623,7 +642,7 @@ class StarboardCog(commands.Cog):
         content_str = f"⭐️ **{count}** | {ref.channel.mention}"
         channel = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
         status_msg = await channel.send(content=content_str)
-        fwd_msg = await channel.send(reference=ref, mention_author=False)
+        fwd_msg = await ref.forward(destination=channel)
         await self.upsert_star_post(ctx.guild.id, ref.id, status_msg.id, fwd_msg.id)
 
     def data_features(self) -> list[DataFeatureMeta]:
