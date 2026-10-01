@@ -26,7 +26,6 @@ class StatusCog(commands.Cog):
             "🎀 gurl i got the best moderation",
             "🎀 Watching downfall of GiveawayBot",
             "🎀 A charity case?",
-            "🎀 I love Aary <3",
             "🎀 Am the open source underdog",
             "🎀 boy are you a dopamine? cuz i wanna make you dopaMINE!",
             "🎀 Powered by Beacon Framework!",
