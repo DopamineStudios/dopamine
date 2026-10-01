@@ -1,7 +1,7 @@
 import asyncio
 import time
 from collections import deque
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
 
 import discord
 from beacon import PrivateLayoutView, beacon_commands
@@ -69,7 +69,7 @@ class StarboardDashboard(PrivateLayoutView):
 
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
-            "A starboard is like a Hall Of Fame for Discord messages. Users can react to a message with a ⭐️ and once it reaches the set threshold, Dopamine will post a copy of it in the channel you choose."))
+            "A starboard is like a Hall Of Fame for Discord messages. Users can react to a message with a ⭐️ and once it reaches the set threshold, Dopamine will post a status count and forwarded message in the channel you choose."))
 
         if is_enabled:
             container.add_item(discord.ui.TextDisplay(
@@ -157,7 +157,12 @@ class StarboardCog(commands.Cog):
         self.STAR_EMOJI = "⭐"
 
         self.settings_cache: Dict[int, dict] = {}
-        self.star_posts_cache: Dict[int, Dict[int, int]] = {}
+        # guild_id -> {source_message_id: (status_message_id, forwarded_message_id)}
+        self.star_posts_cache: Dict[int, Dict[int, tuple[int, int]]] = {}
+        # status_message_id -> (guild_id, source_message_id)
+        self.status_to_source_cache: Dict[int, tuple[int, int]] = {}
+        # forwarded_message_id -> (guild_id, source_message_id)
+        self.forwarded_to_source_cache: Dict[int, tuple[int, int]] = {}
 
         self.starred_messages: deque[int] = deque(maxlen=10000)
         self.lfg_creators: dict[int, int] = {}
@@ -187,18 +192,23 @@ class StarboardCog(commands.Cog):
         """Load all data from DB into memory."""
         self.settings_cache.clear()
         self.star_posts_cache.clear()
+        self.status_to_source_cache.clear()
+        self.forwarded_to_source_cache.clear()
 
         rows = await self.bot.db.execute("SELECT * FROM starboard_guild_settings")
         for data in rows:
             self.settings_cache[data["guild_id"]] = data
 
         rows = await self.bot.db.execute(
-            "SELECT guild_id, source_message_id, starboard_message_id FROM star_posts")
+            "SELECT guild_id, source_message_id, status_message_id, forwarded_message_id FROM star_posts")
         for row in rows:
-            gid, src_id, sb_id = row["guild_id"], row["source_message_id"], row["starboard_message_id"]
+            gid, src_id = row["guild_id"], row["source_message_id"]
+            status_id, fwd_id = row["status_message_id"], row["forwarded_message_id"]
             if gid not in self.star_posts_cache:
                 self.star_posts_cache[gid] = {}
-            self.star_posts_cache[gid][src_id] = sb_id
+            self.star_posts_cache[gid][src_id] = (status_id, fwd_id)
+            self.status_to_source_cache[status_id] = (gid, src_id)
+            self.forwarded_to_source_cache[fwd_id] = (gid, src_id)
 
     async def get_guild_settings(self, guild_id: int) -> dict:
         """Fetch settings from cache, or create in DB and cache if missing."""
@@ -241,45 +251,65 @@ class StarboardCog(commands.Cog):
         else:
             return "⭐"
 
-    async def upsert_star_post(self, guild_id: int, source_id: int, starboard_id: int):
-        """Update both DB and cache manually for star posts."""
+    async def upsert_star_post(self, guild_id: int, source_id: int, status_id: int, forwarded_id: int):
+        """Update both DB and cache for star posts and reverse lookups."""
         if guild_id not in self.star_posts_cache:
             self.star_posts_cache[guild_id] = {}
-        self.star_posts_cache[guild_id][source_id] = starboard_id
+        
+        old_ids = self.star_posts_cache[guild_id].get(source_id)
+        if old_ids:
+            old_status, old_fwd = old_ids
+            self.status_to_source_cache.pop(old_status, None)
+            self.forwarded_to_source_cache.pop(old_fwd, None)
+
+        self.star_posts_cache[guild_id][source_id] = (status_id, forwarded_id)
+        self.status_to_source_cache[status_id] = (guild_id, source_id)
+        self.forwarded_to_source_cache[forwarded_id] = (guild_id, source_id)
 
         await self.bot.db.execute("""
-                             INSERT INTO star_posts (guild_id, source_message_id, starboard_message_id)
-                             VALUES (?, ?, ?) ON CONFLICT(guild_id, source_message_id) DO
-                             UPDATE SET
-                                 starboard_message_id = excluded.starboard_message_id
-                             """, (guild_id, source_id, starboard_id))
+            INSERT INTO star_posts (guild_id, source_message_id, status_message_id, forwarded_message_id)
+            VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, source_message_id) DO
+            UPDATE SET
+                status_message_id = excluded.status_message_id,
+                forwarded_message_id = excluded.forwarded_message_id
+            """, (guild_id, source_id, status_id, forwarded_id))
 
     async def delete_star_post(self, guild_id: int, source_id: int):
-        """Remove from both DB and cache manually."""
+        """Remove from DB, cache, reverse lookups, and votes."""
         if guild_id in self.star_posts_cache:
-            self.star_posts_cache[guild_id].pop(source_id, None)
+            ids = self.star_posts_cache[guild_id].pop(source_id, None)
+            if ids:
+                status_id, fwd_id = ids
+                self.status_to_source_cache.pop(status_id, None)
+                self.forwarded_to_source_cache.pop(fwd_id, None)
 
         await self.bot.db.execute(
             "DELETE FROM star_posts WHERE guild_id = ? AND source_message_id = ?",
             (guild_id, source_id)
         )
+        await self.bot.db.execute(
+            "DELETE FROM star_votes WHERE guild_id = ? AND source_message_id = ?",
+            (guild_id, source_id)
+        )
 
-    def get_star_post(self, guild_id: int, source_id: int) -> Optional[int]:
+    def get_star_post(self, guild_id: int, source_id: int) -> Optional[tuple[int, int]]:
         """Pure cache read for performance."""
         return self.star_posts_cache.get(guild_id, {}).get(source_id)
 
-    def get_source_from_starboard(self, guild_id: int, starboard_message_id: int) -> Optional[int]:
-        """Reverse lookup in cache to find source ID from starboard ID."""
-        if guild_id not in self.star_posts_cache:
-            return None
-        for src_id, sb_id in self.star_posts_cache[guild_id].items():
-            if sb_id == starboard_message_id:
+    def get_source_from_starboard(self, guild_id: int, message_id: int) -> Optional[int]:
+        """Reverse lookup to find source ID from status or forwarded message ID."""
+        if message_id in self.status_to_source_cache:
+            gid, src_id = self.status_to_source_cache[message_id]
+            if gid == guild_id:
+                return src_id
+        if message_id in self.forwarded_to_source_cache:
+            gid, src_id = self.forwarded_to_source_cache[message_id]
+            if gid == guild_id:
                 return src_id
         return None
 
     @tasks.loop(minutes=5)
     async def _cache_cleanup(self):
-        """Standard LFG/Cooldown cleanup (Settings/Star cache persist)."""
         await self.bot.db.wait_ready()
         current_time = time.time()
 
@@ -292,27 +322,6 @@ class StarboardCog(commands.Cog):
         to_remove_cd = [k for k, v in self.guild_cooldowns.items() if current_time - v > 600]
         for k in to_remove_cd:
             self.guild_cooldowns.pop(k, None)
-
-    def build_starboard_embed(self, message: discord.Message) -> discord.Embed:
-        text = message.content.strip() if message.content else ""
-        embed = discord.Embed(description=text, color=discord.Color.gold())
-        embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
-        embed.add_field(name="Jump to Message", value=f"[Click Here]({message.jump_url})", inline=False)
-        embed.timestamp = message.created_at
-
-        image_url = None
-        for att in message.attachments:
-            if att.content_type and att.content_type.startswith("image/"):
-                image_url = att.url
-                break
-        if not image_url:
-            for e in message.embeds:
-                if e.image and e.image.url: image_url = e.image.url; break
-                if e.thumbnail and e.thumbnail.url: image_url = e.thumbnail.url; break
-                if e.type == "image" and e.url: image_url = e.url; break
-        if image_url:
-            embed.set_image(url=image_url)
-        return embed
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
@@ -363,141 +372,233 @@ class StarboardCog(commands.Cog):
     async def _process_starboard_payload(self, payload: discord.RawReactionActionEvent):
         try:
             guild = self.bot.get_guild(payload.guild_id) or await self.bot.fetch_guild(payload.guild_id)
-            if not guild: return
+            if not guild:
+                return
 
             settings = await self.get_guild_settings(guild.id)
-
             if not settings.get("enabled", 0):
                 return
 
             sb_id = settings.get("starboard_channel_id")
-            if not sb_id: return
+            if not sb_id:
+                return
 
-            source_id_from_sb = self.get_source_from_starboard(guild.id, payload.message_id)
+            # Determine source message ID
+            source_msg_id = None
+            source_channel_id = None
 
-            if source_id_from_sb:
-                source_msg_id = source_id_from_sb
-                sb_chan = guild.get_channel(payload.channel_id) or await guild.fetch_channel(payload.channel_id)
-                sb_msg = await sb_chan.fetch_message(payload.message_id)
+            # Check if payload message is already known as a board post (status or forwarded)
+            mapped_source_id = self.get_source_from_starboard(guild.id, payload.message_id)
+            if mapped_source_id:
+                source_msg_id = mapped_source_id
+                # Find source channel from cache or fetch
+                # We need source channel ID. Let's query from star_posts or fetch message.
+                # Actually, let's fetch message across guild text channels or check database.
+                pass
 
-                try:
-                    url = sb_msg.embeds[0].fields[0].value.split("(")[1].split(")")[0]
-                    parts = url.split("/")
-                    source_channel_id = int(parts[-2])
-                except (IndexError, ValueError):
-                    return
-            else:
+            if not source_msg_id:
                 if payload.channel_id == sb_id:
                     return
                 source_msg_id = payload.message_id
                 source_channel_id = payload.channel_id
+            else:
+                # We have source_msg_id, we need to find its channel. We can query star_posts or search channels if needed,
+                # or store source_channel_id in cache/db. But wait! Let's check how we can easily get source message.
+                # If we store source_channel_id or fetch message directly:
+                pass
 
-            try:
-                src_chan = guild.get_channel(source_channel_id) or await guild.fetch_channel(source_channel_id)
-                msg = await src_chan.fetch_message(source_msg_id)
-            except discord.NotFound:
-                return
+            # Let's locate the source message across guild channels if source_channel_id is not yet known
+            src_chan = None
+            msg = None
 
-
-            star_react_source = next((r for r in msg.reactions if str(r.emoji) == self.STAR_EMOJI), None)
-            count_source = star_react_source.count if star_react_source else 0
-
-            existing_id = self.get_star_post(guild.id, msg.id)
-            count_sb = 0
-            sbc = guild.get_channel(sb_id)
-            if not sbc:
+            if source_channel_id:
                 try:
-                    sbc = await guild.fetch_channel(sb_id)
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
-                    if is_access_error(e):
-                        await report_access_failure(self.bot, guild.id, "starboard", str(sb_id))
-                    return
-
-            if existing_id:
-                try:
-                    sbm = await sbc.fetch_message(existing_id)
-                    star_react_sb = next((r for r in sbm.reactions if str(r.emoji) == self.STAR_EMOJI), None)
-                    if star_react_sb:
-                        count_sb = star_react_sb.count
+                    src_chan = guild.get_channel(source_channel_id) or await guild.fetch_channel(source_channel_id)
+                    msg = await src_chan.fetch_message(source_msg_id)
                 except discord.NotFound:
-                    await self.delete_star_post(guild.id, msg.id)
-                    existing_id = None
-                except:
+                    return
+            else:
+                # Search by searching channels or fetching from status/forwarded message
+                # If payload message is in board channel, fetch the status and forwarded messages to inspect
+                existing_ids = self.get_star_post(guild.id, source_msg_id)
+                if not existing_ids:
+                    return
+                status_id, fwd_id = existing_ids
+                sbc = guild.get_channel(sb_id) or await guild.fetch_channel(sb_id)
+                try:
+                    fwd_msg = await sbc.fetch_message(fwd_id)
+                    if fwd_msg.reference and fwd_msg.reference.message_id:
+                        source_msg_id = fwd_msg.reference.message_id
+                        # reference channel id if available or search
+                        if fwd_msg.reference.channel_id:
+                            source_channel_id = fwd_msg.reference.channel_id
+                            src_chan = guild.get_channel(source_channel_id) or await guild.fetch_channel(source_channel_id)
+                            msg = await src_chan.fetch_message(source_msg_id)
+                except Exception:
                     pass
 
-            total_count = count_source + count_sb
+                if not msg:
+                    # Fallback: scan text channels or check cache
+                    return
 
-            if total_count < settings["star_threshold"]:
-                if existing_id:
-                    try:
-                        sbm = await sbc.fetch_message(existing_id)
-                        await sbm.delete()
-                    except:
-                        pass
+            if not msg:
+                return
+
+            # Collect all unique non-bot users who reacted with STAR_EMOJI across source, status, and forwarded messages
+            reactors: Set[int] = set()
+
+            # 1. Source message reactions
+            star_react_source = next((r for r in msg.reactions if str(r.emoji) == self.STAR_EMOJI), None)
+            if star_react_source:
+                async for user in star_react_source.users():
+                    if not user.bot:
+                        reactors.add(user.id)
+
+            # 2. Board message reactions (if they exist)
+            existing_ids = self.get_star_post(guild.id, msg.id)
+            sbc = guild.get_channel(sb_id) or await guild.fetch_channel(sb_id)
+            status_msg = None
+            fwd_msg = None
+
+            if existing_ids:
+                status_id, fwd_id = existing_ids
+                try:
+                    status_msg = await sbc.fetch_message(status_id)
+                    star_react_status = next((r for r in status_msg.reactions if str(r.emoji) == self.STAR_EMOJI), None)
+                    if star_react_status:
+                        async for user in star_react_status.users():
+                            if not user.bot:
+                                reactors.add(user.id)
+                except discord.NotFound:
+                    pass
+
+                try:
+                    fwd_msg = await sbc.fetch_message(fwd_id)
+                    star_react_fwd = next((r for r in fwd_msg.reactions if str(r.emoji) == self.STAR_EMOJI), None)
+                    if star_react_fwd:
+                        async for user in star_react_fwd.users():
+                            if not user.bot:
+                                reactors.add(user.id)
+                except discord.NotFound:
+                    pass
+
+            # Sync unique reactors to star_votes table (Unified Vote Pool & Deduplication)
+            await self.bot.db.execute("DELETE FROM star_votes WHERE guild_id = ? AND source_message_id = ?", (guild.id, msg.id))
+            for uid in reactors:
+                await self.bot.db.execute(
+                    "INSERT OR IGNORE INTO star_votes (guild_id, source_message_id, user_id) VALUES (?, ?, ?)",
+                    (guild.id, msg.id, uid)
+                )
+
+            rows = await self.bot.db.execute(
+                "SELECT COUNT(*) as count FROM star_votes WHERE guild_id = ? AND source_message_id = ?",
+                (guild.id, msg.id)
+            )
+            total_count = rows[0]["count"] if rows else 0
+
+            threshold = settings["star_threshold"]
+
+            if total_count < threshold:
+                if existing_ids:
+                    s_id, f_id = existing_ids
+                    for mid in (s_id, f_id):
+                        try:
+                            bm = await sbc.fetch_message(mid)
+                            await bm.delete()
+                        except Exception:
+                            pass
                     await self.delete_star_post(guild.id, msg.id)
                 return
 
-            embed = self.build_starboard_embed(msg)
             dynamic_emoji = self.get_star_emoji(total_count)
             content_str = f"{dynamic_emoji} **{total_count}** | {msg.channel.mention}"
 
-            try:
-                if existing_id:
-                    try:
-                        sbm = await sbc.fetch_message(existing_id)
-                        await sbm.edit(content=content_str, embed=embed)
-                    except discord.NotFound:
-                        new_sbm = await sbc.send(content=content_str, embed=embed)
-                        await self.upsert_star_post(guild.id, msg.id, new_sbm.id)
-                else:
-                    new_sbm = await sbc.send(content=content_str, embed=embed)
-                    await self.upsert_star_post(guild.id, msg.id, new_sbm.id)
-            except Exception as e:
-                if is_access_error(e):
-                    await report_access_failure(self.bot, guild.id, "starboard", str(sb_id))
+            if existing_ids:
+                status_id, fwd_id = existing_ids
+                try:
+                    status_msg = await sbc.fetch_message(status_id)
+                    await status_msg.edit(content=content_str)
+                except discord.NotFound:
+                    # Recreate status message and forwarded message if missing
+                    status_msg = await sbc.send(content=content_str)
+                    fwd_msg = await sbc.send(reference=msg, mention_author=False)
+                    await self.upsert_star_post(guild.id, msg.id, status_msg.id, fwd_msg.id)
+            else:
+                status_msg = await sbc.send(content=content_str)
+                fwd_msg = await sbc.send(reference=msg, mention_author=False)
+                await self.upsert_star_post(guild.id, msg.id, status_msg.id, fwd_msg.id)
 
+        except Exception as e:
+            if is_access_error(e):
+                await report_access_failure(self.bot, guild.id, "starboard", str(sb_id))
         finally:
             self._starboard_tasks.pop(payload.message_id, None)
 
     @commands.Cog.listener()
     async def on_raw_reaction_clear(self, payload: discord.RawReactionClearEvent):
-        existing = self.get_star_post(payload.guild_id, payload.message_id)
-        if not existing: return
+        source_id = self.get_source_from_starboard(payload.guild_id, payload.message_id) or payload.message_id
+        existing = self.get_star_post(payload.guild_id, source_id)
+        if not existing:
+            return
 
-        try:
-            settings = await self.get_guild_settings(payload.guild_id)
-            sbc = self.bot.get_channel(settings["starboard_channel_id"]) or await self.bot.fetch_channel(settings["starboard_channel_id"])
-            sbm = await sbc.fetch_message(existing)
-            await sbm.delete()
-        except:
-            pass
-        await self.delete_star_post(payload.guild_id, payload.message_id)
+        settings = await self.get_guild_settings(payload.guild_id)
+        sb_id = settings.get("starboard_channel_id")
+        if sb_id:
+            try:
+                sbc = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
+                for mid in existing:
+                    try:
+                        bm = await sbc.fetch_message(mid)
+                        await bm.delete()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        await self.delete_star_post(payload.guild_id, source_id)
 
     @commands.Cog.listener()
-    async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        if not after.guild: return
-        existing = self.get_star_post(after.guild.id, after.id)
-        if not existing: return
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        if not payload.guild_id:
+            return
+        
+        # Check if deleted message is source message
+        existing = self.get_star_post(payload.guild_id, payload.message_id)
+        if existing:
+            settings = await self.get_guild_settings(payload.guild_id)
+            sb_id = settings.get("starboard_channel_id")
+            if sb_id:
+                try:
+                    sbc = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
+                    for mid in existing:
+                        try:
+                            bm = await sbc.fetch_message(mid)
+                            await bm.delete()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            await self.delete_star_post(payload.guild_id, payload.message_id)
+            return
 
-        settings = await self.get_guild_settings(after.guild.id)
-        star_react = next((r for r in after.reactions if str(r.emoji) == self.STAR_EMOJI), None)
-        count_source = star_react.count if star_react else 0
-
-        try:
-            sbc = after.guild.get_channel(settings["starboard_channel_id"])
-            sbm = await sbc.fetch_message(existing)
-
-            star_react_sb = next((r for r in sbm.reactions if str(r.emoji) == self.STAR_EMOJI), None)
-            count_sb = star_react_sb.count if star_react_sb else 0
-
-            total = count_source + count_sb
-
-            embed = self.build_starboard_embed(after)
-            dynamic_emoji = self.get_star_emoji(total)
-            content_str = f"{dynamic_emoji} {total} | {after.channel.mention}"
-            await sbm.edit(content=content_str, embed=embed)
-        except:
-            pass
+        # Check if deleted message is status or forwarded message
+        source_id = self.get_source_from_starboard(payload.guild_id, payload.message_id)
+        if source_id:
+            existing = self.get_star_post(payload.guild_id, source_id)
+            if existing:
+                settings = await self.get_guild_settings(payload.guild_id)
+                sb_id = settings.get("starboard_channel_id")
+                if sb_id:
+                    try:
+                        sbc = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
+                        for mid in existing:
+                            try:
+                                bm = await sbc.fetch_message(mid)
+                                await bm.delete()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                await self.delete_star_post(payload.guild_id, source_id)
 
     @beacon_commands.command(name="starboard", description="Configure the Starboard via Dashboard", permissions_preset="automation")
     async def starboard_dashboard(self, interaction: discord.Interaction):
@@ -505,25 +606,25 @@ class StarboardCog(commands.Cog):
         view = StarboardDashboard(interaction.user, self, interaction.guild.id)
         await interaction.response.send_message(view=view)
 
-    lfg_group = app_commands.Group(name="lfg", description="LFG commands")
-
     @commands.command(name="teststarboard")
     async def teststarboard(self, ctx: commands.Context):
-        if ctx.author.id != 758576879715483719 or not ctx.message.reference: return
+        if ctx.author.id != 758576879715483719 or not ctx.message.reference:
+            return
 
         ref = await ctx.channel.fetch_message(ctx.message.reference.message_id)
         settings = await self.get_guild_settings(ctx.guild.id)
         sb_id = settings.get("starboard_channel_id")
-        if not sb_id: return
+        if not sb_id:
+            return
 
         star_react = next((r for r in ref.reactions if str(r.emoji) == self.STAR_EMOJI), None)
-        count = star_react.count if star_react else 0
+        count = star_react.count if star_react else 1
 
-        embed = self.build_starboard_embed(ref)
-        content_str = f"⭐️ {count} in {ref.channel.mention}"
-
+        content_str = f"⭐️ **{count}** | {ref.channel.mention}"
         channel = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
-        await channel.send(content=content_str, embed=embed)
+        status_msg = await channel.send(content=content_str)
+        fwd_msg = await channel.send(reference=ref, mention_author=False)
+        await self.upsert_star_post(ctx.guild.id, ref.id, status_msg.id, fwd_msg.id)
 
     def data_features(self) -> list[DataFeatureMeta]:
         return [DataFeatureMeta(
@@ -542,11 +643,26 @@ class StarboardCog(commands.Cog):
             self.bot.db, "SELECT * FROM starboard_guild_settings WHERE guild_id = ?", (guild_id,))
         posts = await export_table(
             self.bot.db, "SELECT * FROM star_posts WHERE guild_id = ?", (guild_id,))
-        chunk.guild_data[guild_id] = {"settings": settings, "star_posts": posts}
+        votes = await export_table(
+            self.bot.db, "SELECT * FROM star_votes WHERE guild_id = ?", (guild_id,))
+        chunk.guild_data[guild_id] = {"settings": settings, "star_posts": posts, "star_votes": votes}
         return chunk
 
     async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
-        return DataDeleteResult(feature_id="starboard")
+        if feature_id and feature_id != "starboard":
+            return DataDeleteResult(feature_id="starboard")
+        rows_affected = 0
+        async with self.bot.db.acquire_db() as db:
+            query = "DELETE FROM star_votes WHERE user_id = ?"
+            params = (user_id,)
+            if guild_ids:
+                placeholders = ",".join("?" * len(guild_ids))
+                query += f" AND guild_id IN ({placeholders})"
+                params += tuple(guild_ids)
+            res = await db.execute(query, params)
+            await db.commit()
+            rows_affected = res if isinstance(res, int) else res.get("rowcount", 0)
+        return DataDeleteResult(feature_id="starboard", deleted=True, rows_affected=rows_affected)
 
     async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
         if feature_id and feature_id != "starboard":
@@ -554,10 +670,11 @@ class StarboardCog(commands.Cog):
 
         async with self.bot.db.acquire_db() as db:
             res1 = await db.execute("DELETE FROM star_posts WHERE guild_id = ?", (guild_id,))
-            res2 = await db.execute("DELETE FROM starboard_guild_settings WHERE guild_id = ?", (guild_id,))
+            res2 = await db.execute("DELETE FROM star_votes WHERE guild_id = ?", (guild_id,))
+            res3 = await db.execute("DELETE FROM starboard_guild_settings WHERE guild_id = ?", (guild_id,))
             await db.commit()
 
-        rows_affected = (res1 if isinstance(res1, int) else 0) + (res2 if isinstance(res2, int) else 0)
+        rows_affected = sum(r if isinstance(r, int) else 0 for r in (res1, res2, res3))
 
         self.settings_cache.pop(guild_id, None)
         self.star_posts_cache.pop(guild_id, None)

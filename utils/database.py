@@ -1,6 +1,8 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
+
 import turso.aio.sync
 
 
@@ -42,6 +44,68 @@ class DatabaseManager:
         await self.conn.commit()
 
     async def ensure_schema(self):
+        # Migrate old star_posts table if legacy column exists within a transaction
+        try:
+            cursor = await self.conn.execute("PRAGMA table_info(star_posts);")
+            rows = await cursor.fetchall()
+            cols = [row[1] for row in rows]
+            if cols and "starboard_message_id" in cols and "status_message_id" not in cols:
+                await self.conn.execute("BEGIN TRANSACTION;")
+                try:
+                    await self.conn.execute("""
+                        CREATE TABLE star_posts_new (
+                            guild_id INTEGER NOT NULL,
+                            source_message_id INTEGER NOT NULL,
+                            status_message_id INTEGER NOT NULL,
+                            forwarded_message_id INTEGER NOT NULL,
+                            PRIMARY KEY (guild_id, source_message_id)
+                        );
+                    """)
+                    await self.conn.execute("""
+                        INSERT OR IGNORE INTO star_posts_new (guild_id, source_message_id, status_message_id, forwarded_message_id)
+                        SELECT guild_id, source_message_id, starboard_message_id, starboard_message_id FROM star_posts;
+                    """)
+                    await self.conn.execute("DROP TABLE star_posts;")
+                    await self.conn.execute("ALTER TABLE star_posts_new RENAME TO star_posts;")
+                    await self.conn.commit()
+                except Exception as e:
+                    await self.conn.execute("ROLLBACK;")
+                    logging.error(f"Failed to migrate star_posts table: {e}")
+                    raise
+        except Exception as e:
+            logging.debug(f"star_posts migration check skipped or failed: {e}")
+
+        # Migrate old skull_posts table if legacy column exists within a transaction
+        try:
+            cursor = await self.conn.execute("PRAGMA table_info(skull_posts);")
+            rows = await cursor.fetchall()
+            cols = [row[1] for row in rows]
+            if cols and "skullboard_message_id" in cols and "status_message_id" not in cols:
+                await self.conn.execute("BEGIN TRANSACTION;")
+                try:
+                    await self.conn.execute("""
+                        CREATE TABLE skull_posts_new (
+                            guild_id INTEGER NOT NULL,
+                            source_message_id INTEGER NOT NULL,
+                            status_message_id INTEGER NOT NULL,
+                            forwarded_message_id INTEGER NOT NULL,
+                            PRIMARY KEY (guild_id, source_message_id)
+                        );
+                    """)
+                    await self.conn.execute("""
+                        INSERT OR IGNORE INTO skull_posts_new (guild_id, source_message_id, status_message_id, forwarded_message_id)
+                        SELECT guild_id, source_message_id, skullboard_message_id, skullboard_message_id FROM skull_posts;
+                    """)
+                    await self.conn.execute("DROP TABLE skull_posts;")
+                    await self.conn.execute("ALTER TABLE skull_posts_new RENAME TO skull_posts;")
+                    await self.conn.commit()
+                except Exception as e:
+                    await self.conn.execute("ROLLBACK;")
+                    logging.error(f"Failed to migrate skull_posts table: {e}")
+                    raise
+        except Exception as e:
+            logging.debug(f"skull_posts migration check skipped or failed: {e}")
+
         schema_sql = """
             -- moderation.py tables (collision renames applied)
             CREATE TABLE IF NOT EXISTS moderation_users (
@@ -150,9 +214,19 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS star_posts (
                 guild_id INTEGER NOT NULL,
                 source_message_id INTEGER NOT NULL,
-                starboard_message_id INTEGER NOT NULL,
+                status_message_id INTEGER NOT NULL,
+                forwarded_message_id INTEGER NOT NULL,
                 PRIMARY KEY (guild_id, source_message_id)
             );
+            CREATE TABLE IF NOT EXISTS star_votes (
+                guild_id INTEGER NOT NULL,
+                source_message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, source_message_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_star_posts_status ON star_posts(status_message_id);
+            CREATE INDEX IF NOT EXISTS idx_star_posts_forwarded ON star_posts(forwarded_message_id);
+            CREATE INDEX IF NOT EXISTS idx_star_votes_user ON star_votes(guild_id, user_id);
 
             -- skullboard.py tables (collision renames applied)
             CREATE TABLE IF NOT EXISTS skullboard_guild_settings (
@@ -164,9 +238,19 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS skull_posts (
                 guild_id INTEGER NOT NULL,
                 source_message_id INTEGER NOT NULL,
-                skullboard_message_id INTEGER NOT NULL,
+                status_message_id INTEGER NOT NULL,
+                forwarded_message_id INTEGER NOT NULL,
                 PRIMARY KEY (guild_id, source_message_id)
             );
+            CREATE TABLE IF NOT EXISTS skull_votes (
+                guild_id INTEGER NOT NULL,
+                source_message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, source_message_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_skull_posts_status ON skull_posts(status_message_id);
+            CREATE INDEX IF NOT EXISTS idx_skull_posts_forwarded ON skull_posts(forwarded_message_id);
+            CREATE INDEX IF NOT EXISTS idx_skull_votes_user ON skull_votes(guild_id, user_id);
 
             -- welcome.py tables
             CREATE TABLE IF NOT EXISTS welcome_settings (
