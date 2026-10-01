@@ -21,7 +21,7 @@ class StatusCog(commands.Cog):
         total_members = sum(guild.member_count for guild in self.bot.guilds if guild.member_count)
 
         return [
-            "🎀 Im da real security"
+            "🎀 Im da real security",
             f"🎀 Watching {guild_count} Servers",
             "🎀 gurl i got the best moderation",
             "🎀 Watching downfall of GiveawayBot",
