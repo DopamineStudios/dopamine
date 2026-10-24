@@ -1,7 +1,7 @@
 import asyncio
 import codecs
 import time
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Any
 
 import discord
 from beacon import beacon_commands
@@ -96,12 +96,13 @@ class TempHideCog(commands.Cog):
         chunk.guild_data[guild_id] = {"messages": messages}
         return chunk
 
-    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None,
+                               feature_id: str | None) -> DataDeleteResult:
         if feature_id and feature_id != "temphide":
             return DataDeleteResult(feature_id="temphide")
         rows_affected = 0
         if guild_ids is None:
-            rows_affected = await self.bot.db.execute_write(
+            rows_affected = await self.bot.db.execute(
                 "DELETE FROM temp_messages WHERE user_id = ?", (user_id,))
             for mid, data in list(self.message_cache.items()):
                 if data["user_id"] == user_id:
@@ -109,14 +110,18 @@ class TempHideCog(commands.Cog):
         else:
             rows = await export_table(
                 self.bot.db, "SELECT message_id FROM temp_messages WHERE user_id = ?", (user_id,))
-            for row in rows:
-                gid = await self._resolve_message_guild_id(row["message_id"])
-                if gid not in guild_ids:
-                    continue
-                await self.bot.db.execute_write(
-                    "DELETE FROM temp_messages WHERE message_id = ?", (row["message_id"],))
-                self.message_cache.pop(row["message_id"], None)
-                rows_affected += 1
+
+            async with self.bot.db.acquire_db() as db:
+                for row in rows:
+                    gid = await self._resolve_message_guild_id(row["message_id"])
+                    if gid not in guild_ids:
+                        continue
+                    await db.execute(
+                        "DELETE FROM temp_messages WHERE message_id = ?", (row["message_id"],))
+                    self.message_cache.pop(row["message_id"], None)
+                    rows_affected += 1
+                await db.commit()
+
         return DataDeleteResult(feature_id="temphide", deleted=True, rows_affected=rows_affected)
 
     async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
@@ -124,14 +129,18 @@ class TempHideCog(commands.Cog):
             return DataDeleteResult(feature_id="temphide")
         rows_affected = 0
         rows = await export_table(self.bot.db, "SELECT message_id FROM temp_messages", ())
-        for row in rows:
-            gid = await self._resolve_message_guild_id(row["message_id"])
-            if gid != guild_id:
-                continue
-            await self.bot.db.execute_write(
-                "DELETE FROM temp_messages WHERE message_id = ?", (row["message_id"],))
-            self.message_cache.pop(row["message_id"], None)
-            rows_affected += 1
+
+        async with self.bot.db.acquire_db() as db:
+            for row in rows:
+                gid = await self._resolve_message_guild_id(row["message_id"])
+                if gid != guild_id:
+                    continue
+                await db.execute(
+                    "DELETE FROM temp_messages WHERE message_id = ?", (row["message_id"],))
+                self.message_cache.pop(row["message_id"], None)
+                rows_affected += 1
+            await db.commit()
+
         return DataDeleteResult(feature_id="temphide", deleted=True, rows_affected=rows_affected)
 
     async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:

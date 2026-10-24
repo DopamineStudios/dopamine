@@ -230,3 +230,8 @@ __pycache__/
 /cogs/tournament.py
 
 plans
+
+.roo
+AGENTS.md
+
+.vscode

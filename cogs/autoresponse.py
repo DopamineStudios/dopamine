@@ -2,18 +2,15 @@ import asyncio
 import json
 import re
 import time
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Set
 
-import aiosqlite
 import discord
 from beacon import PrivateLayoutView, beacon_commands
 from discord.ext import commands
 from rapidfuzz import fuzz
 
 from cogs.embed import UseEmbedPage
-from utils.data_handlers import export_table
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
 from utils.discord_health import is_access_error, report_access_failure
 
@@ -91,6 +88,7 @@ def apply_variables(text: str, message: discord.Message) -> str:
         text = text.replace(key, value)
     return text
 
+
 class GoToPageModal(discord.ui.Modal):
     def __init__(self, current_page: int, total_pages: int, parent_view: "ManageAutoresponsePage"):
         super().__init__(title="Go to Page")
@@ -121,6 +119,7 @@ class GoToPageModal(discord.ui.Modal):
         self.parent_view.autoresponses = self.parent_view.cog.get_guild_autoresponses(self.parent_view.guild_id)
         self.parent_view.build_layout()
         await interaction.response.edit_message(view=self.parent_view)
+
 
 class DestructiveConfirmationView(PrivateLayoutView):
     def __init__(self, user, record_id, cog, guild_id):
@@ -180,6 +179,7 @@ class DestructiveConfirmationView(PrivateLayoutView):
             self.value = False
             await self.update_view(interaction, "Timed Out", discord.Color(0xdf5046))
 
+
 class AutoresponseDashboard(PrivateLayoutView):
     def __init__(self, user, cog: "Autoresponse", guild_id: int):
         super().__init__(user, timeout=None)
@@ -191,10 +191,13 @@ class AutoresponseDashboard(PrivateLayoutView):
         self.clear_items()
         container = discord.ui.Container()
         container.add_item(discord.ui.TextDisplay("## Autoresponse Dashboard"))
-        container.add_item(discord.ui.TextDisplay("Reply to messages automatically that contain specific letters or words with a text message, link, or embed."))
+        container.add_item(discord.ui.TextDisplay(
+            "Reply to messages automatically that contain specific letters or words with a text message, link, or embed."))
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay("### Match Modes:\n* **Exact Match:** Matches the string exactly.\n* **Partial Match:** Triggers if the string is anywhere in the message.\n* **Fuzzy Match:** Triggers response based on how much a specific string matches the message. It works on a percentage score. Default is 75%, but you can customise it for each Autoresponse!"))
-        container.add_item(discord.ui.TextDisplay("### Variables:\n* **User Variables (User who triggered the response):** `{author.mention}`, `{author.name}`, `{author.display_name}`, and `{author.id}`.\n* **Channel Variables (Channel where response was triggered):** `{channel.mention}`, `{channel.name}`, and `{channel.id}`.\n* **Guild Variables (Guild is the Discord internal word for server):** `{guild.name}`, `{guild.member_count}`, and `{guild.id}`."))
+        container.add_item(discord.ui.TextDisplay(
+            "### Match Modes:\n* **Exact Match:** Matches the string exactly.\n* **Partial Match:** Triggers if the string is anywhere in the message.\n* **Fuzzy Match:** Triggers response based on how much a specific string matches the message. It works on a percentage score. Default is 75%, but you can customise it for each Autoresponse!"))
+        container.add_item(discord.ui.TextDisplay(
+            "### Variables:\n* **User Variables (User who triggered the response):** `{author.mention}`, `{author.name}`, `{author.display_name}`, and `{author.id}`.\n* **Channel Variables (Channel where response was triggered):** `{channel.mention}`, `{channel.name}`, and `{channel.id}`.\n* **Guild Variables (Guild is the Discord internal word for server):** `{guild.name}`, `{guild.member_count}`, and `{guild.id}`."))
         create_btn = discord.ui.Button(label="Create", style=discord.ButtonStyle.primary)
         manage_btn = discord.ui.Button(label="Manage & Edit", style=discord.ButtonStyle.secondary)
 
@@ -232,7 +235,8 @@ class AutoresponseDashboard(PrivateLayoutView):
 
 
 class ManageAutoresponsePage(PrivateLayoutView):
-    def __init__(self, user, cog: "Autoresponse", guild_id: int, autoresponses: List[AutoresponseRecord], page: int = 1):
+    def __init__(self, user, cog: "Autoresponse", guild_id: int, autoresponses: List[AutoresponseRecord],
+                 page: int = 1):
         super().__init__(user, timeout=None)
         self.cog = cog
         self.guild_id = guild_id
@@ -272,8 +276,10 @@ class ManageAutoresponsePage(PrivateLayoutView):
 
             nav_row = discord.ui.ActionRow()
             left_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=(self.page <= 1))
-            goto_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}", style=discord.ButtonStyle.secondary)
-            right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= total_pages))
+            goto_btn = discord.ui.Button(label=f"Page {self.page} of {total_pages}",
+                                         style=discord.ButtonStyle.secondary)
+            right_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
+                                          disabled=(self.page >= total_pages))
 
             async def prev_page(interaction: discord.Interaction):
                 self.page -= 1
@@ -438,7 +444,8 @@ class EditAutoresponsePage(PrivateLayoutView):
 
         async def edit_fuzzy_callback(interaction: discord.Interaction):
             if self.record.match_mode != "fuzzy":
-                await interaction.response.send_message("Fuzzy mode is not enabled for this Autoresponse.", ephemeral=True)
+                await interaction.response.send_message("Fuzzy mode is not enabled for this Autoresponse.",
+                                                        ephemeral=True)
                 return
             modal = FuzzyScoreModal(self.cog, self.guild_id, self.record, parent_view=self)
             await interaction.response.send_modal(modal)
@@ -451,7 +458,8 @@ class EditAutoresponsePage(PrivateLayoutView):
             await interaction.response.edit_message(view=self)
 
         async def delete_callback(interaction: discord.Interaction):
-            view = DestructiveConfirmationView(user=interaction.user, record_id=self.record.id, cog=self.cog, guild_id=self.guild_id)
+            view = DestructiveConfirmationView(user=interaction.user, record_id=self.record.id, cog=self.cog,
+                                               guild_id=self.guild_id)
             await interaction.response.send_message(view=view)
 
         async def return_dashboard_callback(interaction: discord.Interaction):
@@ -516,7 +524,8 @@ class EditAutoresponsePage(PrivateLayoutView):
 
 
 class TriggerEditModal(discord.ui.Modal):
-    def __init__(self, cog: "Autoresponse", guild_id: int, record: AutoresponseRecord, parent_view: EditAutoresponsePage):
+    def __init__(self, cog: "Autoresponse", guild_id: int, record: AutoresponseRecord,
+                 parent_view: EditAutoresponsePage):
         super().__init__(title="Edit Trigger")
         self.cog = cog
         self.guild_id = guild_id
@@ -548,7 +557,8 @@ class TriggerEditModal(discord.ui.Modal):
 
 
 class EditTextResponseModal(discord.ui.Modal):
-    def __init__(self, cog: "Autoresponse", guild_id: int, record: AutoresponseRecord, parent_view: EditAutoresponsePage):
+    def __init__(self, cog: "Autoresponse", guild_id: int, record: AutoresponseRecord,
+                 parent_view: EditAutoresponsePage):
         super().__init__(title="Edit Text Response")
         self.cog = cog
         self.guild_id = guild_id
@@ -574,7 +584,8 @@ class EditTextResponseModal(discord.ui.Modal):
 
 
 class FuzzyScoreModal(discord.ui.Modal):
-    def __init__(self, cog: "Autoresponse", guild_id: int, record: AutoresponseRecord, parent_view: EditAutoresponsePage):
+    def __init__(self, cog: "Autoresponse", guild_id: int, record: AutoresponseRecord,
+                 parent_view: EditAutoresponsePage):
         super().__init__(title="Edit Fuzzy Match Score")
         self.cog = cog
         self.guild_id = guild_id
@@ -619,7 +630,8 @@ class ChannelSelect(PrivateLayoutView):
         container = discord.ui.Container()
         self.select = discord.ui.ChannelSelect(placeholder="Select a channel...", min_values=0, max_values=25)
         self.select.callback = self.select_channel
-        container.add_item(discord.ui.TextDisplay(f"{"### Step 3: Select the channel where you want the string to be detected:" if self.firsttime else "### Select the channel where you want the string to be detected:"}"))
+        container.add_item(discord.ui.TextDisplay(
+            "### Step 3: Select the channel where you want the string to be detected:" if self.firsttime else "### Select the channel where you want the string to be detected:"))
         container.add_item(discord.ui.ActionRow(self.select))
         if self.firsttime:
             skip_button = discord.ui.Button(label="Skip (Detect in All Channels / Set it up later)",
@@ -679,10 +691,13 @@ class FinalStep(PrivateLayoutView):
         self.clear_items()
         container = discord.ui.Container()
 
-        container.add_item(discord.ui.TextDisplay(f"### Step 4: Finalise the Autoresponse by configuring the settings below."))
+        container.add_item(
+            discord.ui.TextDisplay("### Step 4: Finalise the Autoresponse by configuring the settings below."))
         container.add_item(discord.ui.Separator())
-        case_btn = discord.ui.Button(label=f"{'Disable' if self.draft.get('case_sensitive', False) else 'Enable'} Case Sensitivity",
-                                     style=discord.ButtonStyle.secondary if self.draft.get('case_sensitive', False) else discord.ButtonStyle.primary)
+        case_btn = discord.ui.Button(
+            label=f"{'Disable' if self.draft.get('case_sensitive', False) else 'Enable'} Case Sensitivity",
+            style=discord.ButtonStyle.secondary if self.draft.get('case_sensitive',
+                                                                  False) else discord.ButtonStyle.primary)
         mode_labels = {
             "exact": "Mode: Exact Match",
             "partial": "Mode: Partial Match",
@@ -698,12 +713,14 @@ class FinalStep(PrivateLayoutView):
         )
         edit_fuzzy_btn = discord.ui.Button(label="Edit Fuzzy Mode Score",
                                            style=discord.ButtonStyle.secondary)
-        section = discord.ui.Section(discord.ui.TextDisplay("* **Case Sensitivity:** Whether the case (uppercase or lowercase) should match exactly with the trigger string."), accessory=case_btn)
+        section = discord.ui.Section(discord.ui.TextDisplay(
+            "* **Case Sensitivity:** Whether the case (uppercase or lowercase) should match exactly with the trigger string."),
+                                     accessory=case_btn)
         container.add_item(section)
 
         section = discord.ui.Section(discord.ui.TextDisplay(
             "* **Mode:** The Match Mode for the Autoresponse. Pick between Exact, Partial, and Fuzzy. For more info, refer to the Autoresponse dashboard."),
-                                    accessory=mode_btn)
+            accessory=mode_btn)
         container.add_item(section)
 
         section = discord.ui.Section(discord.ui.TextDisplay(
@@ -712,7 +729,6 @@ class FinalStep(PrivateLayoutView):
 
         if self.draft.get("match_mode", "exact") == "fuzzy":
             container.add_item(section)
-
 
         container.add_item(discord.ui.Separator())
 
@@ -851,7 +867,8 @@ class ResponseTypeView(PrivateLayoutView):
     def build_layout(self):
         self.clear_items()
         container = discord.ui.Container()
-        container.add_item(discord.ui.TextDisplay("### Step 2: Select a type of message for the response to continue creating Autoresponse"))
+        container.add_item(discord.ui.TextDisplay(
+            "### Step 2: Select a type of message for the response to continue creating Autoresponse"))
         container.add_item(discord.ui.Separator())
 
         text_btn = discord.ui.Button(label="Text", style=discord.ButtonStyle.primary)
@@ -880,7 +897,8 @@ class ResponseTypeView(PrivateLayoutView):
                 self.draft["response_type"] = "embed"
                 self.draft["embed_content"] = content or None
                 self.draft["embed_data"] = embed_obj.to_dict()
-                view = ChannelSelect(self.user, self.cog, self.guild_id, draft=self.draft, autoresponse=None, firsttime=1)
+                view = ChannelSelect(self.user, self.cog, self.guild_id, draft=self.draft, autoresponse=None,
+                                     firsttime=1)
                 await inter.response.edit_message(content=None, embed=None, view=view)
 
             view = UseEmbedPage(
@@ -930,35 +948,21 @@ class Autoresponse(commands.Cog):
         self.cache: Dict[int, Dict[int, AutoresponseRecord]] = {}
 
     async def cog_load(self):
-        await self.bot.db.wait_ready()
         await self.populate_cache()
 
     async def cog_unload(self):
         pass
 
-    @asynccontextmanager
-    async def acquire_db(self):
-        async with self.bot.db.acquire_db() as db:
-            yield db
-
-    async def init_db(self):
-        await self.bot.db.wait_ready()
-
     async def populate_cache(self):
-        async with self.acquire_db() as db:
-            async with db.execute(
-                """
-                SELECT id, guild_id, trigger, response_type, response_text, embed_content,
-                       embed_data, channels, match_mode, fuzzy_threshold, case_sensitive,
-                       created_by, created_at
-                FROM autoresponses
-                """
-            ) as cursor:
-                rows = await cursor.fetchall()
-                columns = [col[0] for col in cursor.description]
-
-        for row in rows:
-            data = dict(zip(columns, row))
+        rows = await self.bot.db.execute(
+            """
+            SELECT id, guild_id, trigger, response_type, response_text, embed_content,
+                   embed_data, channels, match_mode, fuzzy_threshold, case_sensitive,
+                   created_by, created_at
+            FROM autoresponses
+            """
+        )
+        for data in rows:
             record = AutoresponseRecord(
                 id=data["id"],
                 guild_id=data["guild_id"],
@@ -990,13 +994,14 @@ class Autoresponse(commands.Cog):
     def get_guild_autoresponses(self, guild_id: int) -> List[AutoresponseRecord]:
         return list(self.cache.get(guild_id, {}).values())
 
-    async def create_autoresponse_from_draft(self, guild_id: int, user_id: int, draft: Dict[str, Any]) -> AutoresponseRecord:
+    async def create_autoresponse_from_draft(self, guild_id: int, user_id: int,
+                                             draft: Dict[str, Any]) -> AutoresponseRecord:
         now_ts = int(time.time())
         channels_raw = _serialize_channels(draft.get("channels"))
         embed_data_raw = _serialize_embed_data(draft.get("embed_data"))
 
-        async with self.acquire_db() as db:
-            cursor = await db.execute(
+        async with self.bot.db.acquire_db() as db:
+            await db.execute(
                 """
                 INSERT INTO autoresponses (
                     guild_id, trigger, response_type, response_text, embed_content,
@@ -1020,8 +1025,10 @@ class Autoresponse(commands.Cog):
                     now_ts,
                 ),
             )
+            id_rows = await db.execute("SELECT last_insert_rowid() AS id")
             await db.commit()
-            new_id = cursor.lastrowid
+
+        new_id = int(id_rows[0]["id"]) if id_rows else 0
 
         record = AutoresponseRecord(
             id=new_id,
@@ -1042,64 +1049,52 @@ class Autoresponse(commands.Cog):
         return record
 
     async def update_autoresponse_trigger(self, guild_id: int, ar_id: int, new_trigger: str):
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE autoresponses SET trigger = ? WHERE id = ? AND guild_id = ?",
-                (new_trigger, ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE autoresponses SET trigger = ? WHERE id = ? AND guild_id = ?",
+            (new_trigger, ar_id, guild_id),
+        )
         if guild_id in self.cache and ar_id in self.cache[guild_id]:
             self.cache[guild_id][ar_id].trigger = new_trigger
 
     async def update_autoresponse_channels(self, guild_id: int, ar_id: int, channels: Optional[Set[int]]):
         raw = _serialize_channels(channels)
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE autoresponses SET channels = ? WHERE id = ? AND guild_id = ?",
-                (raw, ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE autoresponses SET channels = ? WHERE id = ? AND guild_id = ?",
+            (raw, ar_id, guild_id),
+        )
         if guild_id in self.cache and ar_id in self.cache[guild_id]:
             self.cache[guild_id][ar_id].channels = channels
 
     async def update_autoresponse_mode(self, guild_id: int, ar_id: int, mode: str):
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE autoresponses SET match_mode = ? WHERE id = ? AND guild_id = ?",
-                (mode, ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE autoresponses SET match_mode = ? WHERE id = ? AND guild_id = ?",
+            (mode, ar_id, guild_id),
+        )
         if guild_id in self.cache and ar_id in self.cache[guild_id]:
             self.cache[guild_id][ar_id].match_mode = mode
 
     async def update_autoresponse_case(self, guild_id: int, ar_id: int, case_sensitive: bool):
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE autoresponses SET case_sensitive = ? WHERE id = ? AND guild_id = ?",
-                (int(case_sensitive), ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE autoresponses SET case_sensitive = ? WHERE id = ? AND guild_id = ?",
+            (int(case_sensitive), ar_id, guild_id),
+        )
         if guild_id in self.cache and ar_id in self.cache[guild_id]:
             self.cache[guild_id][ar_id].case_sensitive = case_sensitive
 
     async def update_autoresponse_fuzzy(self, guild_id: int, ar_id: int, threshold: int):
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE autoresponses SET fuzzy_threshold = ? WHERE id = ? AND guild_id = ?",
-                (threshold, ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE autoresponses SET fuzzy_threshold = ? WHERE id = ? AND guild_id = ?",
+            (threshold, ar_id, guild_id),
+        )
         if guild_id in self.cache and ar_id in self.cache[guild_id]:
             self.cache[guild_id][ar_id].fuzzy_threshold = threshold
 
     async def update_autoresponse_response_text(self, guild_id: int, ar_id: int, text: str):
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE autoresponses SET response_type = ?, response_text = ?, embed_content = NULL, embed_data = NULL "
-                "WHERE id = ? AND guild_id = ?",
-                ("text", text, ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE autoresponses SET response_type = ?, response_text = ?, embed_content = NULL, embed_data = NULL "
+            "WHERE id = ? AND guild_id = ?",
+            ("text", text, ar_id, guild_id),
+        )
         if guild_id in self.cache and ar_id in self.cache[guild_id]:
             rec = self.cache[guild_id][ar_id]
             rec.response_type = "text"
@@ -1108,20 +1103,18 @@ class Autoresponse(commands.Cog):
             rec.embed_data = None
 
     async def update_autoresponse_embed(
-        self,
-        guild_id: int,
-        ar_id: int,
-        content: Optional[str],
-        embed_data: Dict[str, Any],
+            self,
+            guild_id: int,
+            ar_id: int,
+            content: Optional[str],
+            embed_data: Dict[str, Any],
     ):
         raw_embed = _serialize_embed_data(embed_data)
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE autoresponses SET response_type = ?, response_text = NULL, embed_content = ?, embed_data = ? "
-                "WHERE id = ? AND guild_id = ?",
-                ("embed", content, raw_embed, ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE autoresponses SET response_type = ?, response_text = NULL, embed_content = ?, embed_data = ? "
+            "WHERE id = ? AND guild_id = ?",
+            ("embed", content, raw_embed, ar_id, guild_id),
+        )
         if guild_id in self.cache and ar_id in self.cache[guild_id]:
             rec = self.cache[guild_id][ar_id]
             rec.response_type = "embed"
@@ -1130,12 +1123,10 @@ class Autoresponse(commands.Cog):
             rec.embed_data = embed_data
 
     async def delete_autoresponse(self, guild_id: int, ar_id: int):
-        async with self.acquire_db() as db:
-            await db.execute(
-                "DELETE FROM autoresponses WHERE id = ? AND guild_id = ?",
-                (ar_id, guild_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "DELETE FROM autoresponses WHERE id = ? AND guild_id = ?",
+            (ar_id, guild_id),
+        )
         if guild_id in self.cache:
             self.cache[guild_id].pop(ar_id, None)
 
@@ -1152,22 +1143,26 @@ class Autoresponse(commands.Cog):
 
     async def data_export_guild(self, guild_id: int) -> DataExportChunk:
         chunk = DataExportChunk(feature_id="autoresponse")
-        async with self.acquire_db() as db:
-            rows = await export_table(db, "SELECT * FROM autoresponses WHERE guild_id = ?", (guild_id,))
+        rows = await self.bot.db.execute("SELECT * FROM autoresponses WHERE guild_id = ?", (guild_id,))
         chunk.guild_data[guild_id] = {"autoresponses": rows}
         return chunk
 
-    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None, feature_id: str | None) -> DataDeleteResult:
+    async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None,
+                               feature_id: str | None) -> DataDeleteResult:
         return DataDeleteResult(feature_id="autoresponse")
 
     async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:
         if feature_id and feature_id != "autoresponse":
             return DataDeleteResult(feature_id="autoresponse")
-        async with self.acquire_db() as db:
-            cur = await db.execute("DELETE FROM autoresponses WHERE guild_id = ?", (guild_id,))
+
+        async with self.bot.db.acquire_db() as db:
+            count_rows = await db.execute("SELECT COUNT(*) AS cnt FROM autoresponses WHERE guild_id = ?", (guild_id,))
+            rows_affected = int(count_rows[0]["cnt"]) if count_rows else 0
+            await db.execute("DELETE FROM autoresponses WHERE guild_id = ?", (guild_id,))
             await db.commit()
+
         self.cache.pop(guild_id, None)
-        return DataDeleteResult(feature_id="autoresponse", deleted=True, rows_affected=cur.rowcount)
+        return DataDeleteResult(feature_id="autoresponse", deleted=True, rows_affected=rows_affected)
 
     async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
         return DataMonitorResult(feature_id="autoresponse")
@@ -1216,7 +1211,8 @@ class Autoresponse(commands.Cog):
                         await message.channel.send(response)
                 elif record.response_type == "embed" and record.embed_data:
                     embed = discord.Embed.from_dict(record.embed_data)
-                    content_text = apply_variables(record.embed_content or "", message) if record.embed_content else None
+                    content_text = apply_variables(record.embed_content or "",
+                                                   message) if record.embed_content else None
                     await message.channel.send(content=content_text, embed=embed)
             except Exception as e:
                 if is_access_error(e):
@@ -1225,7 +1221,8 @@ class Autoresponse(commands.Cog):
                     )
                 continue
 
-    @beacon_commands.command(name="autoresponse", description="Open the Autoresponse Dashboard", permissions_preset="automation")
+    @beacon_commands.command(name="autoresponse", description="Open the Autoresponse Dashboard",
+                             permissions_preset="automation")
     async def autoresponse_dashboard(self, interaction: discord.Interaction):
         view = AutoresponseDashboard(interaction.user, self, interaction.guild.id)
         await interaction.response.send_message(view=view)
@@ -1233,4 +1230,3 @@ class Autoresponse(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Autoresponse(bot))
-

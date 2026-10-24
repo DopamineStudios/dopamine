@@ -1,75 +1,24 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
-import turso, turso.sync
+from typing import Any, Dict, Optional
 
-class AsyncExecuteWrapper:
-    def __init__(self, db_manager, sql, params):
-        self.db_manager = db_manager
-        self.sql = sql
-        self.params = params
-        self.cursor = None
+import turso.aio.sync
 
-    async def __aenter__(self):
-        await self.db_manager.wait_ready()
-        def _exec():
-            cur = self.db_manager.conn.cursor()
-            cur.execute(self.sql, self.params)
-            return cur
-        self.cursor = await asyncio.to_thread(_exec)
-        return self.cursor
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None and self.db_manager.conn:
-            await asyncio.to_thread(self.db_manager.conn.commit)
-
-    def __await__(self):
-        async def _awaitable():
-            await self.db_manager.wait_ready()
-            async with self.db_manager._lock:
-                def _exec():
-                    cur = self.db_manager.conn.cursor()
-                    cur.execute(self.sql, self.params)
-                    if cur.description:
-                        rows = cur.fetchall()
-                        return [self.db_manager._dict_factory(cur, r) for r in rows]
-                    self.db_manager.conn.commit()
-                    return cur.rowcount
-                return await asyncio.to_thread(_exec)
-        return _awaitable().__await__()
-
-class AsyncExecutemanyWrapper:
-    def __init__(self, db_manager, sql, seq_of_params):
-        self.db_manager = db_manager
-        self.sql = sql
-        self.seq_of_params = seq_of_params
-
-    def __await__(self):
-        async def _awaitable():
-            await self.db_manager.wait_ready()
-            async with self.db_manager._lock:
-                def _exec():
-                    cur = self.db_manager.conn.cursor()
-                    cur.executemany(self.sql, self.seq_of_params)
-                    self.db_manager.conn.commit()
-                    return cur.rowcount
-                return await asyncio.to_thread(_exec)
-        return _awaitable().__await__()
 
 class AsyncConnectionProxy:
+    """Lightweight proxy yielding database operations within context blocks without holding locks."""
     def __init__(self, db_manager):
         self.db_manager = db_manager
-        self.row_factory = None
 
-    def execute(self, sql, params=()):
-        return AsyncExecuteWrapper(self.db_manager, sql, params)
+    async def execute(self, sql: str, params: tuple = ()) -> Any:
+        return await self.db_manager.execute(sql, params)
 
-    def executemany(self, sql, seq_of_params):
-        return AsyncExecutemanyWrapper(self.db_manager, sql, seq_of_params)
+    async def executemany(self, sql: str, seq_of_params: list) -> int:
+        return await self.db_manager.executemany(sql, seq_of_params)
 
     async def commit(self):
-        if self.db_manager.conn:
-            await asyncio.to_thread(self.db_manager.conn.commit)
+        await self.db_manager.commit()
+
 
 class DatabaseManager:
     def __init__(self, db_path: str, sync_url: Optional[str] = None, auth_token: Optional[str] = None):
@@ -77,28 +26,31 @@ class DatabaseManager:
         self.sync_url = sync_url
         self.auth_token = auth_token
         self.conn = None
-        self._lock = asyncio.Lock()
         self._ready = asyncio.Event()
 
     async def connect(self):
-        async with self._lock:
-            if self.conn is not None:
-                return # Idempotent: prevent duplicate connections from Beacon callbacks
-            
-            # Connect via pyturso
-            self.conn = turso.sync.connect(
-                self.db_path,
-                remote_url=self.sync_url,
-                auth_token=self.auth_token
-            )
-            
-            # Enforce foreign key constraints
-            self.conn.execute("PRAGMA foreign_keys = ON;")
-            self.conn.commit()
+        if self.conn is not None:
+            return
 
-    def _ensure_schema_sync(self):
-        cursor = self.conn.cursor()
-        cursor.executescript("""
+        import os
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+            print(f"[DatabaseManager] Created missing database directory: {db_dir}")
+
+        print(f"[DatabaseManager] Connecting to database at {self.db_path} with sync_url={self.sync_url}")
+        self.conn = await turso.aio.sync.connect(
+            self.db_path,
+            remote_url=self.sync_url,
+            auth_token=self.auth_token
+        )
+
+        await self.conn.execute("PRAGMA journal_mode = WAL;")
+        await self.conn.execute("PRAGMA foreign_keys = ON;")
+        await self.conn.commit()
+
+    async def ensure_schema(self):
+        schema_sql = """
             -- moderation.py tables (collision renames applied)
             CREATE TABLE IF NOT EXISTS moderation_users (
                 guild_id INTEGER,
@@ -161,7 +113,7 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_infractions_guild_user ON infractions(guild_id, user_id);
             CREATE INDEX IF NOT EXISTS idx_infractions_guild_case ON infractions(guild_id, case_number);
 
-            -- discordphone.py tables (collision renames applied)
+            -- discordphone.py tables
             CREATE TABLE IF NOT EXISTS discordphone_users (
                 id INTEGER PRIMARY KEY, reported INTEGER DEFAULT 0, created INTEGER DEFAULT 0, warned INTEGER DEFAULT 0
             );
@@ -206,11 +158,21 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS star_posts (
                 guild_id INTEGER NOT NULL,
                 source_message_id INTEGER NOT NULL,
-                starboard_message_id INTEGER NOT NULL,
+                status_message_id INTEGER NOT NULL,
+                forwarded_message_id INTEGER NOT NULL,
                 PRIMARY KEY (guild_id, source_message_id)
             );
+            CREATE TABLE IF NOT EXISTS star_votes (
+                guild_id INTEGER NOT NULL,
+                source_message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, source_message_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_star_posts_status ON star_posts(status_message_id);
+            CREATE INDEX IF NOT EXISTS idx_star_posts_forwarded ON star_posts(forwarded_message_id);
+            CREATE INDEX IF NOT EXISTS idx_star_votes_user ON star_votes(guild_id, user_id);
 
-            -- skullboard.py tables (collision renames applied)
+            -- skullboard.py tables
             CREATE TABLE IF NOT EXISTS skullboard_guild_settings (
                 guild_id INTEGER PRIMARY KEY,
                 skull_threshold INTEGER DEFAULT 3,
@@ -220,9 +182,19 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS skull_posts (
                 guild_id INTEGER NOT NULL,
                 source_message_id INTEGER NOT NULL,
-                skullboard_message_id INTEGER NOT NULL,
+                status_message_id INTEGER NOT NULL,
+                forwarded_message_id INTEGER NOT NULL,
                 PRIMARY KEY (guild_id, source_message_id)
             );
+            CREATE TABLE IF NOT EXISTS skull_votes (
+                guild_id INTEGER NOT NULL,
+                source_message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, source_message_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_skull_posts_status ON skull_posts(status_message_id);
+            CREATE INDEX IF NOT EXISTS idx_skull_posts_forwarded ON skull_posts(forwarded_message_id);
+            CREATE INDEX IF NOT EXISTS idx_skull_votes_user ON skull_votes(guild_id, user_id);
 
             -- welcome.py tables
             CREATE TABLE IF NOT EXISTS welcome_settings (
@@ -618,63 +590,90 @@ class DatabaseManager:
                 guild_id INTEGER PRIMARY KEY,
                 channel_id INTEGER
             );
-        """)
-        self.conn.commit()
-        if hasattr(self.conn, "push"):
-            try:
-                self.conn.push()
-            except Exception:
-                pass
+        """
 
-    async def ensure_schema(self):
-        async with self._lock:
-            await asyncio.to_thread(self._ensure_schema_sync)
+        if hasattr(self.conn, "executescript"):
+            await self.conn.executescript(schema_sql)
+        else:
+            await self.conn.execute(schema_sql)
+
+        await self.conn.commit()
+        await self.push()
         self._ready.set()
 
     async def wait_ready(self):
-        """Edge Case 2: Block background task loops until DB connection & schema are ready."""
+        """Ensure database schema setup completes before executing queries."""
         await self._ready.wait()
 
     def _dict_factory(self, cursor, row) -> Dict[str, Any]:
-        """Edge Case 1: Convert raw tuples to dictionary rows."""
+        """Convert tuple SQL result rows into dictionary maps."""
         return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
 
-    async def execute(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+    async def execute(self, sql: str, params: tuple = ()) -> Any:
         await self.wait_ready()
-        async with self._lock:
-            return await asyncio.to_thread(self._execute_sync, sql, params)
+
+        is_write = sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "REPLACE"))
+        if is_write:
+            try:
+                await self.conn.execute("BEGIN CONCURRENT;")
+            except Exception:
+                pass
+
+        cursor = await self.conn.execute(sql, params)
+
+        if cursor.description:
+            rows = await cursor.fetchall()
+            return [self._dict_factory(cursor, r) for r in rows]
+
+        await self.conn.commit()
+        return cursor.rowcount
 
     async def execute_write(self, sql: str, params: tuple = ()) -> int:
+        return await self.execute(sql, params)
+
+    async def executemany(self, sql: str, seq_of_params: list) -> int:
         await self.wait_ready()
-        async with self._lock:
-            return await asyncio.to_thread(self._execute_write_sync, sql, params)
+        try:
+            await self.conn.execute("BEGIN CONCURRENT;")
+        except Exception:
+            pass
 
-    def _execute_sync(self, sql: str, params: tuple):
-        cursor = self.conn.cursor()
-        cursor.execute(sql, params)
-        if cursor.description:
-            rows = cursor.fetchall()
-            return [self._dict_factory(cursor, r) for r in rows]
-        self.conn.commit()
-        return []
+        cursor = await self.conn.executemany(sql, seq_of_params)
+        await self.conn.commit()
+        return cursor.rowcount
 
-    def _execute_write_sync(self, sql: str, params: tuple) -> int:
-        cursor = self.conn.cursor()
-        cursor.execute(sql, params)
-        rowcount = cursor.rowcount
-        self.conn.commit()
-        return rowcount
+    async def commit(self):
+        await self.wait_ready()
+        await self.conn.commit()
 
     @asynccontextmanager
     async def acquire_db(self):
+        """Yields an async proxy object. Eliminates reentrant lock deadlocks."""
         await self.wait_ready()
-        async with self._lock:
-            proxy = AsyncConnectionProxy(self)
-            yield proxy
+        yield AsyncConnectionProxy(self)
+
+    async def push(self):
+        """Safely pushes local DB commits to Turso Cloud with a non-blocking 10s network timeout."""
+        if self.conn and hasattr(self.conn, "push"):
+            try:
+                await asyncio.wait_for(self.conn.push(), timeout=10.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+
+    async def start_periodic_sync(self, interval: float = 300.0):
+        """Background loop pushing committed changes periodically."""
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self.push()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
 
     async def close(self):
-        async with self._lock:
-            if self.conn:
-                self.conn.close()
-                self.conn = None
-            self._ready.clear()
+        if self.conn:
+            await self.push()
+            await self.conn.close()
+            self.conn = None
+        self._ready.clear()

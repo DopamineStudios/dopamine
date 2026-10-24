@@ -1,10 +1,10 @@
 import datetime
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 import discord
 from beacon import PrivateView
+from beacon.core import beacon_commands
 from discord import app_commands
 from discord.ext import commands
 
@@ -208,7 +208,7 @@ class ViewNotifyOnReturn(discord.ui.View):
                        custom_id="afk_notify_on_return")
     async def notify_me(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id == self.afk_user_id:
-            return await interaction.response.send_message("Don't you think this is a bit too narcissistic? You can't register to be notified about your own return.",
+            return await interaction.response.send_message("Don't you think this is a bit too narcissistic? You can'register to be notified about your own return.",
                                                            ephemeral=True)
 
         if self.afk_user_id not in self.cog.afk_users:
@@ -251,98 +251,78 @@ class AFK(commands.Cog):
         await self.bot.db.wait_ready()
         await self.populate_caches()
 
-    async def cog_unload(self):
-        pass
-
-    @asynccontextmanager
-    async def acquire_db(self):
-        async with self.bot.db.acquire_db() as db:
-            yield db
-
     async def init_db(self):
         await self.bot.db.wait_ready()
 
     async def populate_caches(self):
-        self.afk_users.clear()
-        self.missed_pings_cache.clear()
-        self.notification_cache.clear()
-
         now = int(discord.utils.utcnow().timestamp())
 
-        async with self.acquire_db() as db:
-            async with db.execute(
-                    """
-                    SELECT user_id, status, is_global, save_missed_pings,
-                           started_at, buffer_until, origin_guild_id, old_nick
-                    FROM afk_users
-                    """
-            ) as cursor:
-                rows = await cursor.fetchall()
-                for row in rows:
-                    (
-                        user_id,
-                        status,
-                        is_global,
-                        save_missed_pings,
-                        started_at,
-                        buffer_until,
-                        origin_guild_id,
-                        old_nick,
-                    ) = row
+        async with self.bot.db.acquire_db() as db:
+            rows = await db.execute(
+                """
+                SELECT user_id, status, is_global, save_missed_pings,
+                       started_at, buffer_until, origin_guild_id, old_nick
+                FROM afk_users
+                """
+            )
 
-                    if now - started_at >= AFK_MAX_SECONDS:
-                        await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
-                        await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ?", (user_id,))
-                        continue
+            expired_users = []
+            for row in rows:
+                user_id = row["user_id"]
+                status = row["status"]
+                is_global = row["is_global"]
+                save_missed_pings = row["save_missed_pings"]
+                started_at = row["started_at"]
+                buffer_until = row["buffer_until"]
+                origin_guild_id = row["origin_guild_id"]
+                old_nick = row["old_nick"]
 
-                    state = AFKState(
-                        user_id=user_id,
-                        status=status,
-                        is_global=bool(is_global),
-                        save_missed_pings=bool(save_missed_pings),
-                        started_at=started_at,
-                        buffer_until=buffer_until,
-                        origin_guild_id=origin_guild_id,
-                        old_nick=old_nick,
-                    )
-                    self.afk_users[user_id] = state
+                if now - started_at >= AFK_MAX_SECONDS:
+                    expired_users.append(user_id)
+                    continue
 
-            async with db.execute(
-                    """
-                    SELECT id, user_id, author_id, guild_id, channel_id,
-                           message_id, content, timestamp
-                    FROM missed_pings
-                    ORDER BY timestamp ASC
-                    """
-            ) as cursor:
-                rows = await cursor.fetchall()
-                for row in rows:
-                    (
-                        mp_id,
-                        user_id,
-                        author_id,
-                        guild_id,
-                        channel_id,
-                        message_id,
-                        content,
-                        timestamp,
-                    ) = row
-                    entry = MissedPing(
-                        id=mp_id,
-                        user_id=user_id,
-                        author_id=author_id,
-                        guild_id=guild_id,
-                        channel_id=channel_id,
-                        message_id=message_id,
-                        content=content or "*No message content*",
-                        timestamp=timestamp,
-                    )
-                    self.missed_pings_cache.setdefault(user_id, []).append(entry)
+                state = AFKState(
+                    user_id=user_id,
+                    status=status,
+                    is_global=bool(is_global),
+                    save_missed_pings=bool(save_missed_pings),
+                    started_at=started_at,
+                    buffer_until=buffer_until,
+                    origin_guild_id=origin_guild_id,
+                    old_nick=old_nick,
+                )
+                self.afk_users[user_id] = state
 
-            async with db.execute("SELECT afk_user_id, observer_id FROM return_notifications") as cursor:
-                rows = await cursor.fetchall()
-                for afk_uid, obs_id in rows:
-                    self.notification_cache.setdefault(afk_uid, set()).add(obs_id)
+            if expired_users:
+                await db.executemany("DELETE FROM afk_users WHERE user_id = ?", [(u,) for u in expired_users])
+                await db.executemany("DELETE FROM return_notifications WHERE afk_user_id = ?", [(u,) for u in expired_users])
+                await db.commit()
+
+            missed_rows = await db.execute(
+                """
+                SELECT id, user_id, author_id, guild_id, channel_id,
+                       message_id, content, timestamp
+                FROM missed_pings
+                ORDER BY timestamp ASC
+                """
+            )
+
+            for row in missed_rows:
+                entry = MissedPing(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    author_id=row["author_id"],
+                    guild_id=row["guild_id"],
+                    channel_id=row["channel_id"],
+                    message_id=row["message_id"],
+                    content=row["content"] or "*No message content*",
+                    timestamp=row["timestamp"],
+                )
+                self.missed_pings_cache.setdefault(row["user_id"], []).append(entry)
+
+            notif_rows = await db.execute("SELECT afk_user_id, observer_id FROM return_notifications")
+            for row in notif_rows:
+                self.notification_cache.setdefault(row["afk_user_id"], set()).add(row["observer_id"])
 
     async def add_notification_request(self, afk_user_id: int, observer_id: int) -> bool:
         observers = self.notification_cache.setdefault(afk_user_id, set())
@@ -350,12 +330,10 @@ class AFK(commands.Cog):
             return False
 
         observers.add(observer_id)
-        async with self.acquire_db() as db:
-            await db.execute(
-                "INSERT OR IGNORE INTO return_notifications (afk_user_id, observer_id) VALUES (?, ?)",
-                (afk_user_id, observer_id)
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "INSERT OR IGNORE INTO return_notifications (afk_user_id, observer_id) VALUES (?, ?)",
+            (afk_user_id, observer_id)
+        )
         return True
 
     async def remove_notification_request(self, afk_user_id: int, observer_id: int) -> bool:
@@ -367,12 +345,10 @@ class AFK(commands.Cog):
         if not observers:
             self.notification_cache.pop(afk_user_id, None)
 
-        async with self.acquire_db() as db:
-            await db.execute(
-                "DELETE FROM return_notifications WHERE afk_user_id = ? AND observer_id = ?",
-                (afk_user_id, observer_id)
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "DELETE FROM return_notifications WHERE afk_user_id = ? AND observer_id = ?",
+            (afk_user_id, observer_id)
+        )
         return True
 
     async def set_afk(
@@ -409,36 +385,34 @@ class AFK(commands.Cog):
 
         self.afk_users[user.id] = state
 
-        async with self.acquire_db() as db:
-            await db.execute(
-                """
-                INSERT INTO afk_users (
-                    user_id, status, is_global,
-                    save_missed_pings, started_at, buffer_until,
-                    origin_guild_id, old_nick
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    status = excluded.status,
-                    is_global = excluded.is_global,
-                    save_missed_pings = excluded.save_missed_pings,
-                    started_at = excluded.started_at,
-                    buffer_until = excluded.buffer_until,
-                    origin_guild_id = excluded.origin_guild_id,
-                    old_nick = excluded.old_nick
-                """,
-                (
-                    user.id,
-                    status,
-                    int(is_global),
-                    int(save_missed_pings),
-                    now,
-                    buffer_until,
-                    origin_guild_id,
-                    old_nick,
-                ),
+        await self.bot.db.execute(
+            """
+            INSERT INTO afk_users (
+                user_id, status, is_global,
+                save_missed_pings, started_at, buffer_until,
+                origin_guild_id, old_nick
             )
-            await db.commit()
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                status = excluded.status,
+                is_global = excluded.is_global,
+                save_missed_pings = excluded.save_missed_pings,
+                started_at = excluded.started_at,
+                buffer_until = excluded.buffer_until,
+                origin_guild_id = excluded.origin_guild_id,
+                old_nick = excluded.old_nick
+            """,
+            (
+                user.id,
+                status,
+                int(is_global),
+                int(save_missed_pings),
+                now,
+                buffer_until,
+                origin_guild_id,
+                old_nick,
+            ),
+        )
 
     async def clear_afk(self, user_id: int, revert_nick: bool = True):
         state = self.afk_users.pop(user_id, None)
@@ -466,16 +440,14 @@ class AFK(commands.Cog):
                     except discord.Forbidden:
                         pass
 
-        async with self.acquire_db() as db:
+        async with self.bot.db.acquire_db() as db:
             await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
             await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ?", (user_id,))
             await db.commit()
 
     async def clear_missed_pings(self, user_id: int):
         self.missed_pings_cache.pop(user_id, None)
-        async with self.acquire_db() as db:
-            await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
-            await db.commit()
+        await self.bot.db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
 
     def _format_afk_notice(self, member: discord.Member | discord.User, state: AFKState) -> str:
         now = int(discord.utils.utcnow().timestamp())
@@ -551,7 +523,7 @@ class AFK(commands.Cog):
         reply = f"{ctx.author.mention} you're now AFK: {status}" if status else f"{ctx.author.mention} you're now AFK!"
         await ctx.send(reply)
 
-    @app_commands.command(name="afk", description="Set or update your AFK status.")
+    @beacon_commands.command(name="afk", description="Set or update your AFK status.")
     @app_commands.describe(
         status="Optional AFK status message.",
         global_mentions="Whether mentions in all servers should trigger AFK responses instead of only the current server.",
@@ -570,7 +542,7 @@ class AFK(commands.Cog):
         state = self.afk_users.get(interaction.user.id)
         if state:
             return await interaction.response.send_message("You're already AFK!", ephemeral=True)
-
+        await interaction.response.defer()
         is_global = bool(global_mentions) if global_mentions is not None else True
         save_mp = bool(save_missed_pings) if save_missed_pings is not None else True
 
@@ -582,8 +554,8 @@ class AFK(commands.Cog):
         )
 
         reply = f"{interaction.user.mention} you're now AFK: {status}" if status else f"{interaction.user.mention} you're now AFK!"
-        await interaction.response.send_message(
-            reply
+        await interaction.edit_original_response(
+            content=reply
         )
 
     @commands.Cog.listener()
@@ -662,12 +634,10 @@ class AFK(commands.Cog):
                 if entry.message_id == message_id:
                     entry.content = "*This message was deleted*"
 
-        async with self.acquire_db() as db:
-            await db.execute(
-                "UPDATE missed_pings SET content = ? WHERE message_id = ?",
-                ("[This message was deleted]", message_id),
-            )
-            await db.commit()
+        await self.bot.db.execute(
+            "UPDATE missed_pings SET content = ? WHERE message_id = ?",
+            ("[This message was deleted]", message_id),
+        )
 
     async def _store_missed_ping(
             self,
@@ -680,40 +650,16 @@ class AFK(commands.Cog):
             content: str,
             timestamp: int,
     ):
-        async with self.acquire_db() as db:
-            cursor = await db.execute(
-                """
-                INSERT INTO missed_pings (
-                    user_id, author_id, guild_id, channel_id,
-                    message_id, content, timestamp
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    user_id,
-                    author_id,
-                    guild_id,
-                    channel_id,
-                    message_id,
-                    content or "*No message content*",
-                    timestamp,
-                ),
+        await self.bot.db.execute(
+            """
+            INSERT INTO missed_pings (
+                user_id, author_id, guild_id, channel_id,
+                message_id, content, timestamp
             )
-            await db.commit()
-            mp_id = cursor.lastrowid
-        if mp_id is None:
-            return
-        entry = MissedPing(
-            id=mp_id,
-            user_id=user_id,
-            author_id=author_id,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            message_id=message_id,
-            content=content or "*No message content*",
-            timestamp=timestamp,
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, author_id, guild_id, channel_id, message_id, content or "*No message content*", timestamp),
         )
-        self.missed_pings_cache.setdefault(user_id, []).append(entry)
 
     def data_features(self) -> list[DataFeatureMeta]:
         return [DataFeatureMeta(
@@ -725,21 +671,18 @@ class AFK(commands.Cog):
 
     async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
         chunk = DataExportChunk(feature_id="afk")
-        async with self.acquire_db() as db:
-            afk_rows = await export_table(
-                db,
-                """SELECT user_id, status, is_global, save_missed_pings, started_at,
-                          buffer_until, origin_guild_id, old_nick
-                   FROM afk_users WHERE user_id = ?""",
-                (user_id,),
-            )
-            missed_rows = await export_table(
-                db,
-                """SELECT id, user_id, author_id, guild_id, channel_id,
-                          message_id, content, timestamp
-                   FROM missed_pings WHERE user_id = ? ORDER BY timestamp ASC""",
-                (user_id,),
-            )
+        afk_rows = await self.bot.db.execute(
+            """SELECT user_id, status, is_global, save_missed_pings, started_at,
+                       buffer_until, origin_guild_id, old_nick
+                FROM afk_users WHERE user_id = ?""",
+            (user_id,),
+        )
+        missed_rows = await self.bot.db.execute(
+            """SELECT id, user_id, author_id, guild_id, channel_id,
+                       message_id, content, timestamp
+                FROM missed_pings WHERE user_id = ? ORDER BY timestamp ASC""",
+            (user_id,),
+        )
         if afk_rows:
             chunk.global_data["afk_state"] = afk_rows[0]
         if missed_rows:
@@ -750,19 +693,21 @@ class AFK(commands.Cog):
         return DataExportChunk(feature_id="afk")
 
     async def data_delete_user(self, user_id: int, *, guild_ids: list[int] | None,
-                               feature_id: str | None) -> DataDeleteResult:
+                                 feature_id: str | None) -> DataDeleteResult:
         if feature_id and feature_id != "afk":
             return DataDeleteResult(feature_id="afk")
-        rows_affected = 0
-        async with self.acquire_db() as db:
-            cur = await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
-            rows_affected += cur.rowcount
-            cur = await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
-            rows_affected += cur.rowcount
-            cur = await db.execute("DELETE FROM return_notifications WHERE afk_user_id = ? OR observer_id = ?",
-                                   (user_id, user_id))
-            rows_affected += cur.rowcount
+
+        async with self.bot.db.acquire_db() as db:
+            r1 = await db.execute("DELETE FROM afk_users WHERE user_id = ?", (user_id,))
+            r2 = await db.execute("DELETE FROM missed_pings WHERE user_id = ?", (user_id,))
+            r3 = await db.execute(
+                "DELETE FROM return_notifications WHERE afk_user_id = ? OR observer_id = ?",
+                (user_id, user_id),
+            )
             await db.commit()
+
+        rows_affected = (r1 or 0) + (r2 or 0) + (r3 or 0)
+
         self.afk_users.pop(user_id, None)
         self.missed_pings_cache.pop(user_id, None)
         self.notification_cache.pop(user_id, None)

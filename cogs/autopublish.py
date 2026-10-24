@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import collections
 from typing import Set
@@ -61,28 +63,31 @@ class AutoPublish(commands.Cog):
 
         if message.channel.type == discord.ChannelType.news:
             self.publish_deque.append(message)
-
             self.new_item_event.set()
 
-    autopublish_group = beacon_commands.Group(name="autopublish",
-                                           description="Manage auto-publishing for announcement channels.")
+    autopublish_group = beacon_commands.Group(
+        name="autopublish",
+        description="Manage auto-publishing for announcement channels."
+    )
 
     @autopublish_group.command(name="enable", description="Enable auto-publishing for a specific channel.")
     @app_commands.describe(channel="The announcement channel to enable auto-publish for.")
     @app_commands.checks.has_permissions(manage_channels=True)
     async def ap_enable(self, interaction: discord.Interaction, channel: discord.TextChannel):
         if not channel.is_news():
-            return await interaction.response.send_message(f"{channel.mention} is not an Announcement channel!",
-                                                           ephemeral=True)
+            return await interaction.response.send_message(
+                f"{channel.mention} is not an Announcement channel!", ephemeral=True
+            )
 
         if channel.id in self.cache:
-            return await interaction.response.send_message(f"Auto-publish is already enabled for {channel.mention}!",
-                                                           ephemeral=True)
+            return await interaction.response.send_message(
+                f"Auto-publish is already enabled for {channel.mention}!", ephemeral=True
+            )
 
         try:
             await self.bot.db.execute(
                 "INSERT OR IGNORE INTO autopublish_channels (channel_id, guild_id) VALUES (?, ?)",
-                (channel.id, interaction.guild.id)
+                (channel.id, interaction.guild.id if interaction.guild else 0)
             )
             self.cache.add(channel.id)
             await interaction.response.send_message(f"Auto-publish enabled for {channel.mention}.", ephemeral=True)
@@ -95,17 +100,19 @@ class AutoPublish(commands.Cog):
     @app_commands.checks.has_permissions(manage_channels=True)
     async def ap_disable(self, interaction: discord.Interaction, channel: discord.TextChannel):
         if channel.id not in self.cache:
-            return await interaction.response.send_message(f"Auto-publish is not enabled for {channel.mention}!",
-                                                           ephemeral=True)
+            return await interaction.response.send_message(
+                f"Auto-publish is not enabled for {channel.mention}!", ephemeral=True
+            )
 
         try:
-            await self.bot.db.execute("DELETE FROM autopublish_channels WHERE channel_id = ?", (channel.id,))
+            await self.bot.db.execute(
+                "DELETE FROM autopublish_channels WHERE channel_id = ?", (channel.id,)
+            )
             self.cache.discard(channel.id)
             await interaction.response.send_message(f"Auto-publish disabled for {channel.mention}.", ephemeral=True)
         except Exception as e:
             print(f"DB Error on disable: {e}")
             await interaction.response.send_message("A database error occurred.", ephemeral=True)
-
 
     def data_features(self) -> list:
         from utils.data_protocol import DataFeatureMeta
@@ -134,10 +141,12 @@ class AutoPublish(commands.Cog):
             "SELECT channel_id FROM autopublish_channels WHERE guild_id = ?", (guild_id,)
         )
         cids = [r["channel_id"] for r in rows]
-        await self.bot.db.execute("DELETE FROM autopublish_channels WHERE guild_id = ?", (guild_id,))
+        deleted_count = await self.bot.db.execute(
+            "DELETE FROM autopublish_channels WHERE guild_id = ?", (guild_id,)
+        )
         for cid in cids:
             self.cache.discard(cid)
-        return DataDeleteResult(feature_id="autopublish", deleted=True, rows_affected=len(cids))
+        return DataDeleteResult(feature_id="autopublish", deleted=True, rows_affected=deleted_count)
 
     async def data_monitor_guild(self, guild: discord.Guild):
         from utils.data_protocol import DataMonitorResult
@@ -145,13 +154,21 @@ class AutoPublish(commands.Cog):
         rows = await self.bot.db.execute(
             "SELECT channel_id FROM autopublish_channels WHERE guild_id = ?", (guild.id,)
         )
-        cids = [r["channel_id"] for r in rows]
-        for cid in cids:
+
+        invalid_cids = []
+        for r in rows:
+            cid = r["channel_id"]
             ch = guild.get_channel(cid)
             if not ch or not ch.permissions_for(guild.me).send_messages:
-                await self.bot.db.execute("DELETE FROM autopublish_channels WHERE channel_id = ?", (cid,))
+                invalid_cids.append((cid,))
                 self.cache.discard(cid)
                 result.actions.append(f"removed_channel_{cid}")
+
+        if invalid_cids:
+            async with self.bot.db.acquire_db() as db:
+                await db.executemany("DELETE FROM autopublish_channels WHERE channel_id = ?", invalid_cids)
+                await db.commit()
+
         return result
 
 

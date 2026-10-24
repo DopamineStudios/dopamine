@@ -51,35 +51,9 @@ If you have any questions, suggestions, or issues, you can join the support serv
 
 # The Team
 
-Dopamine is developed by **Dopamine Studios**. But as of the 1st of June 2026 i.e. the day I'm writing this, there haven't been any contributions to this project of Dopamine Studios other than me, Smite.
+Dopamine is developed by **Dopamine Studios**. The current team comprises of **Smite** and **Pivot**.
 
-# Installation & Setup
-
-### Prerequisites:
-
-* Python 3.14 or higher.
-
-* A Discord Bot Token (via Discord Developer Portal)
-
-* Dependencies listed in requirements.txt
-
-### Local Setup:
-
-1. Clone the repository:
-
-```git clone https://github.com/likerofturtles/dopamine.git```
-
-2. Install the required packages:
-
-```pip install -r requirements.txt```
-
-3. Add this to a .env file in the root folder:
-
-```DISCORD_TOKEN=YourTokenHere```
-
-4. Run the bot:
-
-```python main.py```
+---
 
 # License
 

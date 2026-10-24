@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Set
 
-import aiosqlite
 import discord
 from beacon import PrivateLayoutView, PrivateView, beacon_commands
 from discord import app_commands
@@ -511,7 +510,6 @@ class RoleSelectView(discord.ui.View):
         new_embed = self.parent_view.cog.create_giveaway_embed(self.draft)
         await self.parent_view.message.edit(embed=new_embed)
 
-
         await interaction.response.send_message(f"Updated **{text}** successfully!", ephemeral=True)
 
 
@@ -599,7 +597,7 @@ class GiveawayJoinView(discord.ui.View):
 
         participants = self.cog.participant_cache.get(giveaway_id, set())
 
-        async with self.cog.acquire_db() as db:
+        async with self.cog.bot.db.acquire_db() as db:
             if interaction.user.id in participants:
                 participants.remove(interaction.user.id)
                 await db.execute("DELETE FROM giveaway_participants WHERE giveaway_id = ? AND user_id = ?",
@@ -1115,10 +1113,8 @@ class SearchModal(discord.ui.Modal):
         if self.mode == "id_direct":
             cog = self.parent_view.cog
 
-            async with cog.acquire_db() as db:
-                db.row_factory = aiosqlite.Row
-                async with db.execute("SELECT * FROM templates WHERE template_id = ?", (query,)) as cursor:
-                    row = await cursor.fetchone()
+            rows = await cog.bot.db.execute("SELECT * FROM templates WHERE template_id = ?", (query,))
+            row = rows[0] if rows else None
 
             if not row:
                 return await interaction.response.send_message(
@@ -1210,6 +1206,7 @@ class CreatewithtemplatePage(PrivateLayoutView):
     async def back_callback(self, interaction: discord.Interaction):
         view = CreateChoose(self.cog, self.user)
         await interaction.response.edit_message(view=view)
+
 
 class MystuffUse(PrivateLayoutView):
     def __init__(self, cog, user, templates, page=1):
@@ -1595,133 +1592,29 @@ class Giveaways(commands.Cog):
     async def cog_unload(self):
         self.check_giveaways.cancel()
 
-    @asynccontextmanager
-    async def acquire_db(self):
-        async with self.bot.db.acquire_db() as db:
-            yield db
-
     async def init_db(self):
         await self.bot.db.wait_ready()
-
-    async def _run_migrations(self, db: aiosqlite.Connection):
-        """
-        Automatically fixes data type mismatches in the database.
-        """
-        async with db.execute("SELECT giveaway_id, guild_id, winners_count FROM giveaways") as cursor:
-            async for row in cursor:
-                g_id, guild_id, w_count = row
-
-
-                if isinstance(w_count, str):
-                    try:
-                        new_count = int(w_count)
-                    except ValueError:
-                        new_count = 1
-
-                    await db.execute(
-                        "UPDATE giveaways SET winners_count = ? WHERE giveaway_id = ? AND guild_id = ?",
-                        (new_count, g_id, guild_id)
-                    )
-                    print(
-                        f"[Migration] Fixed winners_count for giveaway {g_id} in guild {guild_id}: '{w_count}' -> {new_count}")
-
-        async with db.execute("SELECT template_id, winners FROM templates") as cursor:
-            async for row in cursor:
-                t_id, w_count = row
-                if isinstance(w_count, str):
-                    try:
-                        new_count = int(w_count)
-                    except ValueError:
-                        new_count = 1
-
-                    await db.execute(
-                        "UPDATE templates SET winners = ? WHERE template_id = ?",
-                        (new_count, t_id)
-                    )
-                    print(f"[Migration] Fixed template winners for {t_id}: '{w_count}' -> {new_count}")
-
-        await db.commit()
-
-    async def _migrate_winner_role_to_text(self, db: aiosqlite.Connection):
-        """
-        Migrates the 'winner_role_id' column from INTEGER to TEXT to support
-        multiple role IDs.
-        """
-        async with db.execute("PRAGMA table_info(giveaways)") as cursor:
-            columns = await cursor.fetchall()
-            winner_role_col = next((c for c in columns if c[1] == "winner_role_id"), None)
-
-            if not winner_role_col or winner_role_col[2].upper() != "TEXT":
-                return
-
-        self.bot.logger.info("[Migration] Detected winner_role_id is not TEXT. Starting migration...")
-
-        await db.execute('''
-            CREATE TABLE giveaways_new (
-                guild_id INTEGER,
-                giveaway_id INTEGER,
-                channel_id INTEGER,
-                message_id INTEGER,
-                prize TEXT,
-                winners_count INTEGER,
-                end_time INTEGER,
-                host_id INTEGER,
-                required_roles TEXT,
-                req_behaviour INTEGER,
-                blacklisted_roles TEXT,
-                extra_entry_roles TEXT,
-                winner_role_id TEXT,  -- This is now TEXT
-                image_url TEXT,
-                thumbnail_url TEXT,
-                color TEXT,
-                ended INTEGER DEFAULT 0,
-                PRIMARY KEY (guild_id, giveaway_id)
-            )
-        ''')
-
-        await db.execute('''
-            INSERT INTO giveaways_new (
-                guild_id, giveaway_id, channel_id, message_id, prize, 
-                winners_count, end_time, host_id, required_roles, 
-                req_behaviour, blacklisted_roles, extra_entry_roles, 
-                winner_role_id, image_url, thumbnail_url, color, ended
-            )
-            SELECT 
-                guild_id, giveaway_id, channel_id, message_id, prize, 
-                winners_count, end_time, host_id, required_roles, 
-                req_behaviour, blacklisted_roles, extra_entry_roles, 
-                winner_role_id, image_url, thumbnail_url, color, ended
-            FROM giveaways
-        ''')
-
-        await db.execute("DROP TABLE giveaways")
-        await db.execute("ALTER TABLE giveaways_new RENAME TO giveaways")
-
-        await db.commit()
-        print("[Migration] winner_role_id successfully migrated to TEXT.")
 
     async def populate_caches(self):
         self.giveaway_cache.clear()
         self.participant_cache.clear()
 
-        async with self.acquire_db() as db:
-            async with db.execute("SELECT * FROM giveaways WHERE ended = 0") as cursor:
-                rows = await cursor.fetchall()
-                columns = [column[0] for column in cursor.description]
-                for row in rows:
-                    data = dict(zip(columns, row))
-                    giveaway_id = data["giveaway_id"]
-                    self.giveaway_cache[giveaway_id] = data
-                    self.participant_cache[giveaway_id] = set()
+        rows = await self.bot.db.execute("SELECT * FROM giveaways WHERE ended = 0")
+        for row in rows:
+            data = dict(row)
+            giveaway_id = data["giveaway_id"]
+            self.giveaway_cache[giveaway_id] = data
+            self.participant_cache[giveaway_id] = set()
 
-            if self.giveaway_cache:
-                placeholders = ", ".join(['?'] * len(self.giveaway_cache))
-                query = f"SELECT giveaway_id, user_id FROM giveaway_participants WHERE giveaway_id in ({placeholders})"
-                async with db.execute(query, list(self.giveaway_cache.keys())) as cursor:
-                    participant_rows = await cursor.fetchall()
-                    for giveaway_id, user_id in participant_rows:
-                        if giveaway_id in self.participant_cache:
-                            self.participant_cache[giveaway_id].add(user_id)
+        if self.giveaway_cache:
+            placeholders = ", ".join(['?'] * len(self.giveaway_cache))
+            query = f"SELECT giveaway_id, user_id FROM giveaway_participants WHERE giveaway_id in ({placeholders})"
+            participant_rows = await self.bot.db.execute(query, list(self.giveaway_cache.keys()))
+            for row in participant_rows:
+                giveaway_id = row["giveaway_id"]
+                user_id = row["user_id"]
+                if giveaway_id in self.participant_cache:
+                    self.participant_cache[giveaway_id].add(user_id)
 
     @tasks.loop(seconds=10)
     async def check_giveaways(self):
@@ -1739,14 +1632,12 @@ class Giveaways(commands.Cog):
     async def end_giveaway(self, giveaway_id: int, guild_id: int):
         g = self.giveaway_cache.get(giveaway_id)
         if not g:
-            async with self.acquire_db() as db:
-                async with db.execute("SELECT * FROM giveaways WHERE giveaway_id = ? AND guild_id = ?",
-                                      (giveaway_id, guild_id)) as cursor:
-                    rows = await cursor.fetchall()
-                    if not rows: return
-                    columns = [column[0] for column in cursor.description]
-                    g = dict(zip(columns, rows))
-                    self.giveaway_cache[giveaway_id] = g
+            rows = await self.bot.db.execute("SELECT * FROM giveaways WHERE giveaway_id = ? AND guild_id = ?",
+                                             (giveaway_id, guild_id))
+            if not rows: return
+            g = dict(rows[0])
+            self.giveaway_cache[giveaway_id] = g
+
         if g.get('ended') == 1:
             return
         whichone = "giveaway_cache"
@@ -1755,11 +1646,9 @@ class Giveaways(commands.Cog):
         raw_participants = list(self.participant_cache.get(giveaway_id, set()))
 
         if not raw_participants:
-            async with self.acquire_db() as db:
-                async with db.execute("SELECT user_id FROM giveaway_participants WHERE giveaway_id = ?",
-                                      (giveaway_id,)) as cursor:
-                    rows = await cursor.fetchall()
-                    raw_participants = [r[0] for r in rows]
+            rows = await self.bot.db.execute("SELECT user_id FROM giveaway_participants WHERE giveaway_id = ?",
+                                             (giveaway_id,))
+            raw_participants = [r["user_id"] for r in rows]
 
         pool = []
 
@@ -1816,7 +1705,7 @@ class Giveaways(commands.Cog):
         winner_data = [(giveaway_id, winner_id) for winner_id in winners]
 
         if winner_data:
-            async with self.acquire_db() as db:
+            async with self.bot.db.acquire_db() as db:
                 await db.executemany(
                     "INSERT INTO giveaway_winners (giveaway_id, user_id) VALUES (?, ?)",
                     winner_data
@@ -1837,7 +1726,6 @@ class Giveaways(commands.Cog):
                 await channel.send(f"🎉 Congratulations to: {mention_str} for winning **{g['prize']}!**")
 
                 winner_role_ids = [int(r) for r in g['winner_role_id'].split(",")] if g['winner_role_id'] else []
-
 
                 async def chunk_list(lst, n):
                     for i in range(0, len(lst), n):
@@ -1868,10 +1756,8 @@ class Giveaways(commands.Cog):
         if whichone == 'giveaway_cache':
             if giveaway_id in self.giveaway_cache:
                 self.giveaway_cache[giveaway_id]['ended'] = 1
-            async with self.acquire_db() as db:
-                await db.execute("UPDATE giveaways SET ended = 1 WHERE giveaway_id = ? and guild_id = ?",
-                                 (giveaway_id, guild_id))
-                await db.commit()
+            await self.bot.db.execute("UPDATE giveaways SET ended = 1 WHERE giveaway_id = ? and guild_id = ?",
+                                      (giveaway_id, guild_id))
         if whichone == 'participant_cache':
             if giveaway_id in self.participant_cache:
                 self.participant_cache.pop(giveaway_id, None)
@@ -1970,36 +1856,31 @@ class Giveaways(commands.Cog):
         self.giveaway_cache[giveaway_id] = data
         self.participant_cache[giveaway_id] = set()
 
-        async with self.acquire_db() as db:
-            placeholders = ", ".join(["?"] * len(data))
-            columns = ", ".join(data.keys())
-            await db.execute(f"INSERT INTO giveaways ({columns}) VALUES ({placeholders})",
-                             tuple(data.values()))
-            await db.commit()
+        placeholders = ", ".join(["?"] * len(data))
+        columns = ", ".join(data.keys())
+        await self.bot.db.execute(f"INSERT INTO giveaways ({columns}) VALUES ({placeholders})",
+                                  tuple(data.values()))
 
     async def fetch_templates(self, guild_id: int = None, user_id: int = None, mode: str = "browse"):
-        async with self.acquire_db() as db:
-            if mode == "mine":
-                query = "SELECT * FROM templates WHERE creator_id = ? ORDER BY usage_count DESC"
-                args = (user_id,)
-            else:
-                query = "SELECT * FROM templates WHERE is_published = 1 OR creation_guild_id = ?"
-                args = (guild_id,)
+        if mode == "mine":
+            query = "SELECT * FROM templates WHERE creator_id = ? ORDER BY usage_count DESC"
+            args = (user_id,)
+        else:
+            query = "SELECT * FROM templates WHERE is_published = 1 OR creation_guild_id = ?"
+            args = (guild_id,)
 
-            db.row_factory = aiosqlite.Row
-            async with db.execute(query, args) as cursor:
-                rows = await cursor.fetchall()
+        rows = await self.bot.db.execute(query, args)
 
-            results = []
-            for row in rows:
-                t = dict(row)
-                if mode == "browse":
-                    creator = self.bot.get_user(t['creator_id']) or await self.bot.fetch_user(t['creator_id'])
-                    t['creator_name'] = f"{creator.display_name} ({creator.name})" if creator else "Unknown"
-                    guild = self.bot.get_guild(t['creation_guild_id']) or await self.bot.fetch_guild(t['guild_id'])
-                    t['guild_name'] = guild.name if guild else "Unknown Guild"
-                results.append(t)
-            return results
+        results = []
+        for row in rows:
+            t = dict(row)
+            if mode == "browse":
+                creator = self.bot.get_user(t['creator_id']) or await self.bot.fetch_user(t['creator_id'])
+                t['creator_name'] = f"{creator.display_name} ({creator.name})" if creator else "Unknown"
+                guild = self.bot.get_guild(t['creation_guild_id']) or await self.bot.fetch_guild(t['guild_id'])
+                t['guild_name'] = guild.name if guild else "Unknown Guild"
+            results.append(t)
+        return results
 
     async def save_template(self, interaction: discord.Interaction, draft: GiveawayDraft):
         template_id = getattr(draft, 'template_id', None)
@@ -2030,16 +1911,17 @@ class Giveaways(commands.Cog):
             "color": draft.color
         }
 
-        async with self.acquire_db() as db:
-            async with db.execute(
-                    "SELECT usage_count, is_published, review_status FROM templates WHERE template_id = ?",
-                    (template_id,)) as cursor:
-                existing = await cursor.fetchone()
+        async with self.bot.db.acquire_db() as db:
+            existing_rows = await db.execute(
+                "SELECT usage_count, is_published, review_status FROM templates WHERE template_id = ?",
+                (template_id,)
+            )
 
-            if existing:
-                data['usage_count'] = existing[0]
-                data['is_published'] = existing[1]
-                data['review_status'] = existing[2]
+            if existing_rows:
+                existing = existing_rows[0]
+                data['usage_count'] = existing['usage_count']
+                data['is_published'] = existing['is_published']
+                data['review_status'] = existing['review_status']
 
                 if data['is_published'] == 1:
                     await self.notify_review_channel_edit(data, interaction.guild.id)
@@ -2054,14 +1936,10 @@ class Giveaways(commands.Cog):
         return template_id
 
     async def delete_template(self, template_id: str):
-        async with self.acquire_db() as db:
-            await db.execute("DELETE FROM templates WHERE template_id = ?", (template_id,))
-            await db.commit()
+        await self.bot.db.execute("DELETE FROM templates WHERE template_id = ?", (template_id,))
 
     async def increment_usage(self, template_id: str):
-        async with self.acquire_db() as db:
-            await db.execute("UPDATE templates SET usage_count = usage_count + 1 WHERE template_id = ?", (template_id,))
-            await db.commit()
+        await self.bot.db.execute("UPDATE templates SET usage_count = usage_count + 1 WHERE template_id = ?", (template_id,))
 
     def template_to_draft(self, t: dict, current_guild_id: int, interaction: discord.Interaction) -> GiveawayDraft:
         is_same = t['creation_guild_id'] == current_guild_id
@@ -2091,10 +1969,8 @@ class Giveaways(commands.Cog):
         status = 1 if publish else 0
         review = "pending" if publish else "none"
 
-        async with self.acquire_db() as db:
-            await db.execute("UPDATE templates SET is_published = ?, review_status = ? WHERE template_id = ?",
-                             (status, review, template_id))
-            await db.commit()
+        await self.bot.db.execute("UPDATE templates SET is_published = ?, review_status = ? WHERE template_id = ?",
+                                  (status, review, template_id))
 
         if publish:
             await self.send_to_review(template_id, interaction)
@@ -2103,20 +1979,16 @@ class Giveaways(commands.Cog):
             await interaction.response.send_message("Template unpublished.", ephemeral=True)
 
     async def send_to_review(self, template_id, interaction):
-        async with self.acquire_db() as db:
-            async with db.execute("SELECT channel_id FROM review_config LIMIT 1") as cursor:
-                row = await cursor.fetchone()
-                if not row: return
-                channel_id = row[0]
+        rows = await self.bot.db.execute("SELECT channel_id FROM review_config LIMIT 1")
+        if not rows: return
+        channel_id = rows[0]["channel_id"]
 
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
         if not channel: return
 
-        async with self.acquire_db() as db:
-            async with db.execute("SELECT * FROM templates WHERE template_id = ?", (template_id,)) as cursor:
-                row = await cursor.fetchone()
-                if not row: return
-                t = dict(zip([c[0] for c in cursor.description], row))
+        rows = await self.bot.db.execute("SELECT * FROM templates WHERE template_id = ?", (template_id,))
+        if not rows: return
+        t = dict(rows[0])
 
         creator = interaction.user
         embed = discord.Embed(title="Template Review Request", color=discord.Color.gold())
@@ -2129,18 +2001,18 @@ class Giveaways(commands.Cog):
         await channel.send(embed=embed, view=view)
 
     async def notify_review_channel_edit(self, t, guild_id):
-        async with self.acquire_db() as db:
-            async with db.execute("SELECT channel_id FROM review_config LIMIT 1") as cursor:
-                row = await cursor.fetchone()
-                if not row: return
-                channel_id = row[0]
+        rows = await self.bot.db.execute("SELECT channel_id FROM review_config LIMIT 1")
+        if not rows: return
+        channel_id = rows[0]["channel_id"]
+
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
         if channel:
             await channel.send(f"⚠️ **Template Edited:** {t['template_id']} ({t['prize']}) was edited by its creator.")
 
     async def handle_review(self, interaction, template_id, creator_id, approved, reason=None):
         status = "approved!" if approved else "rejected."
-        async with self.acquire_db() as db:
+
+        async with self.bot.db.acquire_db() as db:
             await db.execute("UPDATE templates SET review_status = ? WHERE template_id = ?", (status, template_id))
             if not approved:
                 await db.execute("UPDATE templates SET is_published = 0 WHERE template_id = ?", (template_id,))
@@ -2166,11 +2038,9 @@ class Giveaways(commands.Cog):
         if magic:
             data_source = sorted(self.giveaway_cache.items())
         else:
-            async with self.acquire_db() as db:
-                async with db.execute("SELECT giveaway_id, prize FROM giveaways WHERE guild_id = ?",
-                                      (interaction.guild_id,)) as cursor:
-                    rows = await cursor.fetchall()
-                    data_source = [(row[0], {"prize": row[1]}) for row in rows]
+            rows = await self.bot.db.execute("SELECT giveaway_id, prize FROM giveaways WHERE guild_id = ?",
+                                             (interaction.guild_id,))
+            data_source = [(row["giveaway_id"], {"prize": row["prize"]}) for row in rows]
 
         for i, (giveaway_id, data) in enumerate(data_source, 1):
             label = f"{i}. {data['prize']}: {giveaway_id}"
@@ -2193,10 +2063,8 @@ class Giveaways(commands.Cog):
 
     @beacon_commands.command(name="zr", description=".", permissions_preset="bot_owner")
     async def set_review_channel(self, interaction: discord.Interaction):
-        async with self.acquire_db() as db:
-            await db.execute("INSERT OR REPLACE INTO review_config (guild_id, channel_id) VALUES (?, ?)",
-                             (interaction.guild.id, interaction.channel.id))
-            await db.commit()
+        await self.bot.db.execute("INSERT OR REPLACE INTO review_config (guild_id, channel_id) VALUES (?, ?)",
+                                  (interaction.guild.id, interaction.channel.id))
         await interaction.response.send_message(f"Set {interaction.channel.mention} as the review channel.",
                                                 ephemeral=True)
 
@@ -2234,35 +2102,30 @@ class Giveaways(commands.Cog):
         except ValueError:
             return await interaction.response.send_message("That is not a valid ID!", ephemeral=True)
 
-        async with self.acquire_db() as db:
-            async with db.execute("SELECT prize FROM giveaways WHERE giveaway_id = ? and guild_id = ?",
-                                  (giveaway_id, interaction.guild.id,)) as cursor:
-                row = await cursor.fetchone()
-                prize = row[0] if row else "Unknown Prize"
-            async with db.execute(
-                    "SELECT channel_id, message_id, prize FROM giveaways WHERE giveaway_id = ? AND guild_id = ?",
-                    (giveaway_id, interaction.guild.id,)) as cursor:
-                row = await cursor.fetchone()
+        rows = await self.bot.db.execute("SELECT prize FROM giveaways WHERE giveaway_id = ? and guild_id = ?",
+                                         (giveaway_id, interaction.guild.id,))
+        if not rows:
+            return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
 
-            if not row:
-                return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
+        prize = rows[0]["prize"]
 
-            body_content = f"Are you sure you want to delete the giveaway for **{prize}** (ID: {giveaway_id}) permanently?"
-            view = DestructiveConfirmationViewOld("Pending Confirmation", body_content)
-            response = await interaction.response.send_message(view=view)
-            view.message = await interaction.original_response()
-            await view.wait()
+        body_content = f"Are you sure you want to delete the giveaway for **{prize}** (ID: {giveaway_id}) permanently?"
+        view = DestructiveConfirmationViewOld("Pending Confirmation", body_content)
+        response = await interaction.response.send_message(view=view)
+        view.message = await interaction.original_response()
+        await view.wait()
 
-            if view.value is True:
-                async with self.acquire_db() as db:
-                    await db.execute("DELETE FROM giveaways WHERE giveaway_id = ?", (giveaway_id,))
-                    await db.execute("DELETE FROM giveaway_participants WHERE giveaway_id = ?", (giveaway_id,))
-                    await db.execute("DELETE FROM giveaway_winners WHERE giveaway_id = ?", (giveaway_id,))
-                    await db.commit()
-                    try:
-                        self.giveaway_cache.pop(giveaway_id)
-                    except Exception:
-                        pass
+        if view.value is True:
+            async with self.bot.db.acquire_db() as db:
+                await db.execute("DELETE FROM giveaways WHERE giveaway_id = ?", (giveaway_id,))
+                await db.execute("DELETE FROM giveaway_participants WHERE giveaway_id = ?", (giveaway_id,))
+                await db.execute("DELETE FROM giveaway_winners WHERE giveaway_id = ?", (giveaway_id,))
+                await db.commit()
+
+            try:
+                self.giveaway_cache.pop(giveaway_id)
+            except Exception:
+                pass
 
     @giveaway_delete.autocomplete("giveaway_id")
     async def delete_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -2278,18 +2141,20 @@ class Giveaways(commands.Cog):
         except ValueError:
             return await interaction.response.send_message("That is not a valid ID!", ephemeral=True)
 
-        async with self.acquire_db() as db:
-            async with db.execute(
-                    "SELECT prize, winner_role_id, channel_id, ended FROM giveaways WHERE giveaway_id = ?",
-                    (giveaway_id,)) as cursor:
-                g = await cursor.fetchone()
+        g_rows = await self.bot.db.execute(
+            "SELECT prize, winner_role_id, channel_id, ended FROM giveaways WHERE giveaway_id = ?",
+            (giveaway_id,)
+        )
 
-            if not g:
-                return await interaction.response.send_message("Giveaway data not found.", ephemeral=True)
+        if not g_rows:
+            return await interaction.response.send_message("Giveaway data not found.", ephemeral=True)
 
-            if g[3] == 0:
-                return await interaction.response.send_message(
-                    "This giveaway hasn't ended yet! You can't reroll active giveaways.")
+        g = (g_rows[0]["prize"], g_rows[0]["winner_role_id"], g_rows[0]["channel_id"], g_rows[0]["ended"])
+
+        if g[3] == 0:
+            return await interaction.response.send_message(
+                "This giveaway hasn't ended yet! You can't reroll active giveaways.")
+
         line2 = None
         if preserve_winners and g[1]:
             line2 = "Preserve old winners and their winner roles"
@@ -2314,21 +2179,19 @@ class Giveaways(commands.Cog):
                 for i in range(0, len(lst), n):
                     yield lst[i:i + n]
 
-            async with self.acquire_db() as db:
-                async with db.execute(
-                        "SELECT user_id FROM giveaway_participants WHERE giveaway_id = ? AND guild_id = ?",
-                        (giveaway_id, interaction.guild_id,)) as cursor:
-                    rows = await cursor.fetchall()
+            async with self.bot.db.acquire_db() as db:
+                rows = await db.execute(
+                    "SELECT user_id FROM giveaway_participants WHERE giveaway_id = ? AND guild_id = ?",
+                    (giveaway_id, interaction.guild_id,)
+                )
+                pool = [r["user_id"] for r in rows]
 
-                    pool = [r[0] for r in rows]
-
-                async with db.execute("SELECT user_id FROM giveaway_winners WHERE giveaway_id = ?",
-                                      (giveaway_id,)) as cursor:
-                    prev_rows = await cursor.fetchall()
-                    if not prev_rows:
-                        return await interaction.followup.send_response("This giveaway hasn't ended yet!",
-                                                                        ephemeral=True)
-                    prev_winners = [r[0] for r in prev_rows]
+                prev_rows = await db.execute("SELECT user_id FROM giveaway_winners WHERE giveaway_id = ?",
+                                             (giveaway_id,))
+                if not prev_rows:
+                    return await interaction.followup.send_response("This giveaway hasn't ended yet!",
+                                                                    ephemeral=True)
+                prev_winners = [r["user_id"] for r in prev_rows]
 
                 eligible_pool = [uid for uid in pool if uid not in prev_winners]
 
@@ -2358,41 +2221,41 @@ class Giveaways(commands.Cog):
 
                     await db.execute("DELETE FROM giveaway_winners WHERE giveaway_id = ?", (giveaway_id,))
 
-                for new_uid in new_picks:
-                    await db.execute("INSERT INTO giveaway_winners (giveaway_id, user_id) VALUES (?, ?)",
-                                     (giveaway_id, new_uid))
-                    if g[1]:
-                        role = interaction.guild.get_role(g[1])
-                        if not role:
-                            role = interaction.guild.fetch_role(g[1])
-                        if not role:
-                            await interaction.followup_send("I can't find the role to give to the winners!",
-                                                            ephemeral=True)
-                        if role:
-                            for chunk in chunk_list(new_picks, 5):
-                                for new_uid in chunk:
-                                    member = interaction.guild.get_member(
-                                        new_uid) or await interaction.guild.fetch_member(new_uid)
-                                    if member:
-                                        try:
-                                            await member.add_roles(role, reason="Giveaway Winner")
-                                        except discord.HTTPException:
-                                            pass
+                winner_inserts = [(giveaway_id, new_uid) for new_uid in new_picks]
+                await db.executemany("INSERT INTO giveaway_winners (giveaway_id, user_id) VALUES (?, ?)", winner_inserts)
 
-                                await asyncio.sleep(1.5)
+                if g[1]:
+                    role = interaction.guild.get_role(g[1])
+                    if not role:
+                        role = interaction.guild.fetch_role(g[1])
+                    if not role:
+                        await interaction.followup_send("I can't find the role to give to the winners!",
+                                                        ephemeral=True)
+                    if role:
+                        for chunk in chunk_list(new_picks, 5):
+                            for new_uid in chunk:
+                                member = interaction.guild.get_member(
+                                    new_uid) or await interaction.guild.fetch_member(new_uid)
+                                if member:
+                                    try:
+                                        await member.add_roles(role, reason="Giveaway Winner")
+                                    except discord.HTTPException:
+                                        pass
+
+                            await asyncio.sleep(1.5)
 
                 await db.commit()
 
-                channel = self.bot.get_channel(g[2]) or await self.bot.fetch_channel(g[2])
-                if not channel:
-                    return await interaction.response.followup_send(
-                        "I searched far and wide, but I can't find the channel chosen for the giveaway!\n\nEnsure that I have the necessary permissions so that I can announce the new winners.",
-                        ephemeral=True)
+            channel = self.bot.get_channel(g[2]) or await self.bot.fetch_channel(g[2])
+            if not channel:
+                return await interaction.response.followup_send(
+                    "I searched far and wide, but I can't find the channel chosen for the giveaway!\n\nEnsure that I have the necessary permissions so that I can announce the new winners.",
+                    ephemeral=True)
 
-                mention_str = ", ".join([f"<@{w}>" for w in new_picks])
-                mode_text = "added to the pool of winners" if preserve_winners else "selected as the new winners"
-                await channel.send(
-                    f"🎉 Congratulations to: {mention_str} for being {mode_text} for **{g[0]}**!\nThis giveaway has been re-rolled by {interaction.user.mention}.")
+            mention_str = ", ".join([f"<@{w}>" for w in new_picks])
+            mode_text = "added to the pool of winners" if preserve_winners else "selected as the new winners"
+            await channel.send(
+                f"🎉 Congratulations to: {mention_str} for being {mode_text} for **{g[0]}**!\nThis giveaway has been re-rolled by {interaction.user.mention}.")
 
     @giveaway_reroll.autocomplete("giveaway_id")
     async def reroll_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -2401,17 +2264,17 @@ class Giveaways(commands.Cog):
     @giveaway.command(name="list", description="List all giveaways in this server.")
     async def giveaway_list(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        async with self.acquire_db() as db:
-            async with db.execute(
-                    "SELECT prize, ended, end_time, giveaway_id FROM giveaways WHERE guild_id = ? ORDER BY giveaway_id ASC",
-                    (interaction.guild.id,)) as cursor:
-                rows = await cursor.fetchall()
+        rows = await self.bot.db.execute(
+            "SELECT prize, ended, end_time, giveaway_id FROM giveaways WHERE guild_id = ? ORDER BY giveaway_id ASC",
+            (interaction.guild.id,)
+        )
 
         if not rows:
             return await interaction.edit_original_response("No giveaways found for this server.")
 
         lines = []
-        for i, (prize, ended, end_time, giveaway_id) in enumerate(rows, 1):
+        for i, row in enumerate(rows, 1):
+            prize, ended, end_time, giveaway_id = row["prize"], row["ended"], row["end_time"], row["giveaway_id"]
             status = "Ended" if ended == 1 else f"Ends **<t:{end_time}:R>**"
             lines.append(f"{i}. **{prize}**: {status} (`{giveaway_id}`)")
 
@@ -2438,7 +2301,7 @@ class Giveaways(commands.Cog):
 
     async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None) -> DataExportChunk:
         chunk = DataExportChunk(feature_id="giveaway")
-        async with self.acquire_db() as db:
+        async with self.bot.db.acquire_db() as db:
             if guild_ids is None:
                 participants = await export_table(
                     db, "SELECT * FROM giveaway_participants WHERE user_id = ?", (user_id,))
@@ -2484,7 +2347,7 @@ class Giveaways(commands.Cog):
 
     async def data_export_guild(self, guild_id: int) -> DataExportChunk:
         chunk = DataExportChunk(feature_id="giveaway")
-        async with self.acquire_db() as db:
+        async with self.bot.db.acquire_db() as db:
             giveaways = await export_table(db, "SELECT * FROM giveaways WHERE guild_id = ?", (guild_id,))
             participants = await export_table(
                 db, "SELECT * FROM giveaway_participants WHERE guild_id = ?", (guild_id,))
@@ -2511,7 +2374,7 @@ class Giveaways(commands.Cog):
         if feature_id and feature_id != "giveaway":
             return DataDeleteResult(feature_id="giveaway")
         rows_affected = 0
-        async with self.acquire_db() as db:
+        async with self.bot.db.acquire_db() as db:
             if guild_ids is None:
                 cur = await db.execute("DELETE FROM giveaway_participants WHERE user_id = ?", (user_id,))
                 rows_affected += cur.rowcount
@@ -2542,9 +2405,9 @@ class Giveaways(commands.Cog):
             return DataDeleteResult(feature_id="giveaway")
         rows_affected = 0
         giveaway_ids = []
-        async with self.acquire_db() as db:
-            async with db.execute("SELECT giveaway_id FROM giveaways WHERE guild_id = ?", (guild_id,)) as cur:
-                giveaway_ids = [r[0] async for r in cur]
+        async with self.bot.db.acquire_db() as db:
+            rows = await db.execute("SELECT giveaway_id FROM giveaways WHERE guild_id = ?", (guild_id,))
+            giveaway_ids = [r["giveaway_id"] for r in rows]
             if giveaway_ids:
                 placeholders = ",".join("?" * len(giveaway_ids))
                 cur = await db.execute(
@@ -2566,13 +2429,12 @@ class Giveaways(commands.Cog):
 
     async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
         result = DataMonitorResult(feature_id="giveaway")
-        async with self.acquire_db() as db:
-            async with db.execute(
-                "SELECT giveaway_id, channel_id FROM giveaways WHERE guild_id = ? AND ended = 0",
-                (guild.id,),
-            ) as cursor:
-                rows = await cursor.fetchall()
-        for giveaway_id, channel_id in rows:
+        rows = await self.bot.db.execute(
+            "SELECT giveaway_id, channel_id FROM giveaways WHERE guild_id = ? AND ended = 0",
+            (guild.id,),
+        )
+        for row in rows:
+            giveaway_id, channel_id = row["giveaway_id"], row["channel_id"]
             channel = guild.get_channel(channel_id)
             if channel is None:
                 try:
