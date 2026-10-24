@@ -32,6 +32,13 @@ class DatabaseManager:
         if self.conn is not None:
             return
 
+        import os
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+            print(f"[DatabaseManager] Created missing database directory: {db_dir}")
+
+        print(f"[DatabaseManager] Connecting to database at {self.db_path} with sync_url={self.sync_url}")
         self.conn = await turso.aio.sync.connect(
             self.db_path,
             remote_url=self.sync_url,
