@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,12 +31,12 @@ TURSO_LOCAL_PATH = str(BASE_DIR / "databases" / "dopamine.db")
 DATABASES_DIR = BASE_DIR / "databases"
 
 # Asset paths (fonts, images, etc.)
-MAX_PATH = BASE_DIR / "databases" / "MAXWITHSTRAPON.jpg"
-FONT_PATH = BASE_DIR / "databases" / "max.ttf"
-WELCOMECARD_PATH = BASE_DIR / "databases" / "welcomecard.png"
-LEAVECARD_PATH = BASE_DIR / "databases" / "welcomecard.png"
-BOLDFONT_PATH = BASE_DIR / "databases" / "Bold.ttf"
-MEDIUMFONT_PATH = BASE_DIR / "databases" / "Medium.ttf"
+MAX_PATH = BASE_DIR / "assets" / "MAXWITHSTRAPON.jpg"
+FONT_PATH = BASE_DIR / "assets" / "max.ttf"
+WELCOMECARD_PATH = BASE_DIR / "assets" / "welcomecard.png"
+LEAVECARD_PATH = BASE_DIR / "assets" / "welcomecard.png"
+BOLDFONT_PATH = BASE_DIR / "assets" / "Bold.ttf"
+MEDIUMFONT_PATH = BASE_DIR / "assets" / "Medium.ttf"
 
 # Top.gg settings
 TOPGG_API_URL = "https://top.gg/api/bots/{bot_id}/check"
