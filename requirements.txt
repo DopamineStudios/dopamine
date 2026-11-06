@@ -14,3 +14,4 @@ pillow~=12.3.0
 pytz~=2026.3
 python-dotenv~=1.2.2
 setuptools~=81.0.0
+google-genai~=2.0.0
