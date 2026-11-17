@@ -14,6 +14,7 @@ import discord
 from beacon import PrivateLayoutView, beacon_commands
 from discord.ext import commands, tasks
 
+from VERSION import bot_version
 from cogs.data_views import (
     DataHome,
     ExportQueuedView,
@@ -33,12 +34,12 @@ from utils.data_protocol import (
     EXPORT_COOLDOWN_SECONDS,
     EXPORT_DEBOUNCE_SECONDS,
     GUILD_RETENTION_DAYS,
+    PASSIVE_FEATURES,
     DataDeleteResult,
     DataExportChunk,
     DataFeatureMeta,
     DataMonitorResult,
 )
-from VERSION import bot_version
 
 
 class Data(commands.Cog):
@@ -424,7 +425,30 @@ class Data(commands.Cog):
                     continue
                 await cog.data_delete_guild(guild_id, feature_id)
 
+    def is_passive_feature(self, target: Any) -> bool:
+        """Check if a cog or feature_id is an exempt passive background service."""
+        if isinstance(target, str):
+            if target in PASSIVE_FEATURES:
+                return True
+            cog = self._get_cog_for_feature(target)
+        else:
+            cog = target
+
+        if cog and hasattr(cog, "data_features"):
+            try:
+                feats = cog.data_features()
+                if feats and any(
+                    getattr(f, "is_passive", False) or getattr(f, "passive", False)
+                    for f in feats
+                ):
+                    return True
+            except Exception:
+                pass
+        return False
+
     async def on_feature_access_failure(self, guild_id: int, feature_id: str, detail: str = ""):
+        if self.is_passive_feature(feature_id):
+            return
         guild = self.bot.get_guild(guild_id)
         if guild is None:
             try:
@@ -462,6 +486,8 @@ class Data(commands.Cog):
             return
         for cog in self.iter_data_cogs():
             if cog is self or not hasattr(cog, "data_monitor_guild"):
+                continue
+            if self.is_passive_feature(cog):
                 continue
             try:
                 result = await cog.data_monitor_guild(guild)
@@ -580,7 +606,7 @@ class Data(commands.Cog):
             pass
 
         for cog in self.iter_data_cogs():
-            if hasattr(cog, "data_monitor_guild"):
+            if hasattr(cog, "data_monitor_guild") and not self.is_passive_feature(cog):
                 try:
                     await cog.data_monitor_guild(guild)
                 except Exception:

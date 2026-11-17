@@ -13,6 +13,14 @@ class DataFeatureMeta:
     guild_export: bool = False
     guild_delete: bool = False
     user_delete_note: Optional[str] = None
+    is_passive: bool = False
+
+    @property
+    def passive(self) -> bool:
+        return self.is_passive
+
+
+PASSIVE_FEATURES: set[str] = {"welcome", "leave"}
 
 
 @dataclass

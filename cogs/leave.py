@@ -581,8 +581,25 @@ class Leaves(commands.Cog):
 
     async def cog_load(self):
         await self.bot.db.wait_ready()
+        await self.restore_persistent_functionality()
         await self.migrate_old_backgrounds()
         await self.populate_caches()
+
+    async def restore_persistent_functionality(self):
+        try:
+            await self.bot.db.execute_write(
+                """UPDATE leave_settings SET is_enabled = 1
+                   WHERE is_enabled = 0 AND channel_id IS NOT NULL
+                   AND guild_id IN (
+                       SELECT guild_id FROM monitor_log WHERE feature_id = 'leave' AND action = 'disabled_leave'
+                   )"""
+            )
+            await self.bot.db.execute_write(
+                "DELETE FROM monitor_log WHERE feature_id = 'leave' AND action = 'disabled_leave'"
+            )
+        except Exception as e:
+            if hasattr(self.bot, 'logger') and self.bot.logger:
+                self.bot.logger.error(f"[Leaves] Error restoring persistent functionality: {e}")
 
     async def cog_unload(self):
         pass
@@ -863,6 +880,9 @@ class Leaves(commands.Cog):
 
             if msg_content or msg_file:
                 await channel.send(content=msg_content, file=msg_file)
+                data_cog = self.bot.get_cog("Data")
+                if data_cog and hasattr(data_cog, "record_usage"):
+                    await data_cog.record_usage("leave", user.id, guild.id, command_name=None)
 
         except Exception as e:
             from utils.discord_health import is_access_error, report_access_failure
@@ -878,7 +898,15 @@ class Leaves(commands.Cog):
 
     def data_features(self) -> list:
         from utils.data_protocol import DataFeatureMeta
-        return [DataFeatureMeta(feature_id="leave", name="Goodbye", guild_export=True, guild_delete=True)]
+        return [
+            DataFeatureMeta(
+                feature_id="leave",
+                name="Goodbye",
+                guild_export=True,
+                guild_delete=True,
+                is_passive=True,
+            )
+        ]
 
     async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
         from utils.data_protocol import DataExportChunk
@@ -912,20 +940,7 @@ class Leaves(commands.Cog):
 
     async def data_monitor_guild(self, guild: discord.Guild):
         from utils.data_protocol import DataMonitorResult
-        result = DataMonitorResult(feature_id="leave")
-        data = self.leave_cache.get(guild.id)
-        if not data or not data.get("is_enabled"):
-            return result
-        channel_id = data.get("channel_id")
-        channel = guild.get_channel(channel_id) if channel_id else None
-        if not channel or not channel.permissions_for(guild.me).send_messages:
-            await self.bot.db.execute(
-                "UPDATE leave_settings SET is_enabled = 0 WHERE guild_id = ?", (guild.id,)
-            )
-            if guild.id in self.leave_cache:
-                self.leave_cache[guild.id]["is_enabled"] = 0
-            result.actions.append("disabled_leave")
-        return result
+        return DataMonitorResult(feature_id="leave")
 
 
 async def setup(bot):
