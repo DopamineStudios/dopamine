@@ -590,26 +590,6 @@ class DatabaseManager:
                 guild_id INTEGER PRIMARY KEY,
                 channel_id INTEGER
             );
-
-            -- Neural Commands tables
-            CREATE TABLE IF NOT EXISTS neural_command_settings (
-                guild_id INTEGER PRIMARY KEY,
-                enabled INTEGER DEFAULT 1,
-                log_channel_id INTEGER,
-                allowed_roles TEXT,
-                blocked_channels TEXT
-            );
-            CREATE TABLE IF NOT EXISTS neural_command_usage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                function_name TEXT NOT NULL,
-                success INTEGER NOT NULL,
-                error_message TEXT,
-                timestamp INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_neural_usage_guild_time ON neural_command_usage (guild_id, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_neural_usage_function ON neural_command_usage (function_name, success);
         """
 
         if hasattr(self.conn, "executescript"):

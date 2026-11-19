@@ -23,10 +23,6 @@ HEARTBEAT_ID = os.getenv("HEARTBEAT_ID", None)
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", None)
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN", None)
 
-# Neural Commands Configuration (Google AI Studio API Key)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", None)
-NEURAL_COMMANDS_MODEL = os.getenv("NEURAL_COMMANDS_MODEL", "models/gemma-4-26b-a4b-it")
-
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent
 

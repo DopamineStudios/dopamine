@@ -72,7 +72,6 @@ COG_NAME_BY_FEATURE: dict[str, str] = {
     "alerts": "Alerts",
     "topgg": "TopGGVoter",
     "usage": "Data",
-    "neural_commands": "NeuralCommands",
 }
 
 COMMAND_PREFIX_TO_FEATURE: dict[str, str] = {
@@ -111,7 +110,6 @@ COMMAND_PREFIX_TO_FEATURE: dict[str, str] = {
     "data": "usage",
     "help": "help",
     "di": "usage",
-    "neural": "neural_commands",
 }
 
 EXPORT_DEBOUNCE_SECONDS = 90
