@@ -302,6 +302,7 @@ class FeatureBrowserPage(PrivateLayoutView):
         nav.add_item(prev_b)
         nav.add_item(page_b)
         nav.add_item(next_b)
+        container.add_item(discord.ui.Separator())
         container.add_item(nav)
         toggle = discord.ui.Button(
             label=f"{'Disable' if self.delete_mode else 'Enable'} Delete Mode",
