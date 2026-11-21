@@ -20,9 +20,35 @@ class AutoPublish(commands.Cog):
 
     async def cog_load(self):
         await self.bot.db.wait_ready()
+        await self.restore_persistent_functionality()
         rows = await self.bot.db.execute("SELECT channel_id FROM autopublish_channels")
         self.cache = {row["channel_id"] for row in rows}
         self.queue_task = asyncio.create_task(self.publish_worker())
+
+    async def restore_persistent_functionality(self):
+        try:
+            rows = await self.bot.db.execute(
+                "SELECT guild_id, action FROM monitor_log WHERE feature_id = 'autopublish' AND action LIKE 'removed_channel_%'"
+            )
+            for row in rows:
+                guild_id = row["guild_id"]
+                action = row["action"]
+                if action.startswith("removed_channel_"):
+                    try:
+                        cid = int(action.replace("removed_channel_", ""))
+                        await self.bot.db.execute_write(
+                            "INSERT OR IGNORE INTO autopublish_channels (channel_id, guild_id) VALUES (?, ?)",
+                            (cid, guild_id)
+                        )
+                        self.cache.add(cid)
+                    except ValueError:
+                        pass
+            await self.bot.db.execute_write(
+                "DELETE FROM monitor_log WHERE feature_id = 'autopublish' AND action LIKE 'removed_channel_%'"
+            )
+        except Exception as e:
+            if hasattr(self.bot, 'logger') and self.bot.logger:
+                self.bot.logger.error(f"[AutoPublish] Error restoring persistent functionality: {e}")
 
     async def cog_unload(self):
         if self.queue_task:
@@ -116,7 +142,15 @@ class AutoPublish(commands.Cog):
 
     def data_features(self) -> list:
         from utils.data_protocol import DataFeatureMeta
-        return [DataFeatureMeta(feature_id="autopublish", name="Auto Publish", guild_export=True, guild_delete=True)]
+        return [
+            DataFeatureMeta(
+                feature_id="autopublish",
+                name="Auto Publish",
+                guild_export=True,
+                guild_delete=True,
+                is_passive=True,
+            )
+        ]
 
     async def data_export_user(self, user_id: int, *, guild_ids: list[int] | None):
         from utils.data_protocol import DataExportChunk
@@ -158,8 +192,14 @@ class AutoPublish(commands.Cog):
         invalid_cids = []
         for r in rows:
             cid = r["channel_id"]
-            ch = guild.get_channel(cid)
-            if not ch or not ch.permissions_for(guild.me).send_messages:
+            channel = guild.get_channel(cid)
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(cid)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    channel = None
+
+            if not channel or not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id or not channel.is_news() or not channel.permissions_for(guild.me).send_messages:
                 invalid_cids.append((cid,))
                 self.cache.discard(cid)
                 result.actions.append(f"removed_channel_{cid}")

@@ -447,8 +447,6 @@ class Data(commands.Cog):
         return False
 
     async def on_feature_access_failure(self, guild_id: int, feature_id: str, detail: str = ""):
-        if self.is_passive_feature(feature_id):
-            return
         guild = self.bot.get_guild(guild_id)
         if guild is None:
             try:
@@ -486,8 +484,6 @@ class Data(commands.Cog):
             return
         for cog in self.iter_data_cogs():
             if cog is self or not hasattr(cog, "data_monitor_guild"):
-                continue
-            if self.is_passive_feature(cog):
                 continue
             try:
                 result = await cog.data_monitor_guild(guild)
@@ -606,7 +602,7 @@ class Data(commands.Cog):
             pass
 
         for cog in self.iter_data_cogs():
-            if hasattr(cog, "data_monitor_guild") and not self.is_passive_feature(cog):
+            if hasattr(cog, "data_monitor_guild"):
                 try:
                     await cog.data_monitor_guild(guild)
                 except Exception:

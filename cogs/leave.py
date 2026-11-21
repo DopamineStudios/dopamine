@@ -940,7 +940,30 @@ class Leaves(commands.Cog):
 
     async def data_monitor_guild(self, guild: discord.Guild):
         from utils.data_protocol import DataMonitorResult
-        return DataMonitorResult(feature_id="leave")
+        result = DataMonitorResult(feature_id="leave")
+        data = self.leave_cache.get(guild.id)
+        if not data or not data.get("is_enabled"):
+            return result
+        channel_id = data.get("channel_id")
+        if not channel_id:
+            return result
+
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = None
+
+        if not channel or not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id or not channel.permissions_for(guild.me).send_messages:
+            async with self.bot.db.acquire_db() as db:
+                await db.execute("UPDATE leave_settings SET is_enabled = 0 WHERE guild_id = ?", (guild.id,))
+                await db.commit()
+            if guild.id in self.leave_cache:
+                self.leave_cache[guild.id]["is_enabled"] = 0
+            result.actions.append("disabled_leave")
+
+        return result
 
 
 async def setup(bot):

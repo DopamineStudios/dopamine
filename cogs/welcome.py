@@ -1014,7 +1014,30 @@ class Welcome(commands.Cog):
 
     async def data_monitor_guild(self, guild: discord.Guild):
         from utils.data_protocol import DataMonitorResult
-        return DataMonitorResult(feature_id="welcome")
+        result = DataMonitorResult(feature_id="welcome")
+        data = self.welcome_cache.get(guild.id)
+        if not data or not data.get("is_enabled"):
+            return result
+        channel_id = data.get("channel_id")
+        if not channel_id:
+            return result
+
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = None
+
+        if not channel or not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id or not channel.permissions_for(guild.me).send_messages:
+            async with self.bot.db.acquire_db() as db:
+                await db.execute("UPDATE welcome_settings SET is_enabled = 0 WHERE guild_id = ?", (guild.id,))
+                await db.commit()
+            if guild.id in self.welcome_cache:
+                self.welcome_cache[guild.id]["is_enabled"] = 0
+            result.actions.append("disabled_welcome")
+
+        return result
 
 
 async def setup(bot):

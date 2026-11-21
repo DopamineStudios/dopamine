@@ -20,7 +20,7 @@ class DataFeatureMeta:
         return self.is_passive
 
 
-PASSIVE_FEATURES: set[str] = {"welcome", "leave"}
+PASSIVE_FEATURES: set[str] = {"welcome", "leave", "autopublish"}
 
 
 @dataclass
