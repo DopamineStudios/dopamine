@@ -3060,7 +3060,7 @@ class Moderation(commands.Cog):
 
 
 class PendingPunishmentsView(PrivateLayoutView):
-    def __init__(self, user, cog, guild: discord.Guild, pending: list, page: int = 0):
+    def __init__(self, user, cog, guild: discord.Guild, pending: list, page: int = 1):
         super().__init__(user, timeout=None)
         self.cog = cog
         self.guild = guild
@@ -3074,7 +3074,7 @@ class PendingPunishmentsView(PrivateLayoutView):
         container = discord.ui.Container()
         container.add_item(discord.ui.TextDisplay("## Pending Punishments"))
 
-        start = self.page * self.per_page
+        start = (self.page - 1) * self.per_page
         end = start + self.per_page
         current_pending = self.pending[start:end]
         if not current_pending:
@@ -3104,14 +3104,16 @@ class PendingPunishmentsView(PrivateLayoutView):
             container.add_item(resolve_row)
 
         nav_row = discord.ui.ActionRow()
-        prev_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 0)
+        prev_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
         prev_btn.callback = self.prev_page
+        page_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary, disabled=self.total_pages <= 1)
+        page_btn.callback = self.go_to_page
         next_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
-                                     disabled=self.page >= self.total_pages - 1)
+                                     disabled=self.page >= self.total_pages)
         next_btn.callback = self.next_page
         nav_row.add_item(prev_btn)
+        nav_row.add_item(page_btn)
         nav_row.add_item(next_btn)
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page + 1} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         container.add_item(nav_row)
@@ -3130,6 +3132,9 @@ class PendingPunishmentsView(PrivateLayoutView):
         await self.build_layout()
         await interaction.edit_original_response(view=self)
 
+    async def go_to_page(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
+
     def make_remove_callback(self, pending_id: int):
         async def callback(interaction: discord.Interaction):
             await interaction.response.defer()
@@ -3140,9 +3145,9 @@ class PendingPunishmentsView(PrivateLayoutView):
                 await interaction.edit_original_response(view=self)
 
             else:
-                self.total_pages = (len(self.pending) - 1) // self.per_page + 1
-                if self.page >= self.total_pages:
-                    self.page = self.total_pages - 1
+                self.total_pages = max(1, (len(self.pending) - 1) // self.per_page + 1)
+                if self.page > self.total_pages:
+                    self.page = self.total_pages
                 await self.build_layout()
                 await interaction.edit_original_response(view=self)
 

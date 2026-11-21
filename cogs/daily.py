@@ -113,6 +113,33 @@ class AddImageModal(discord.ui.Modal, title="Add Cat Image"):
         await interaction.followup.send("\n\n".join(response_msg), ephemeral=True)
 
 
+class CatGoToPageModal(discord.ui.Modal):
+    def __init__(self, parent_view, max_pages: int):
+        super().__init__(title="Jump to Page")
+        self.parent_view = parent_view
+        self.max_pages = max_pages
+        self.page_input = discord.ui.TextInput(
+            label=f"Page Number (1-{max_pages})",
+            placeholder="Enter a page number...",
+            min_length=1,
+            max_length=5,
+            required=True
+        )
+        self.add_item(self.page_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            page_num = int(self.page_input.value)
+            if 1 <= page_num <= self.max_pages:
+                self.parent_view.page = page_num - 1
+                files = await self.parent_view.build()
+                await interaction.response.edit_message(attachments=files, view=self.parent_view)
+            else:
+                await interaction.response.send_message(f"Enter a number between 1 and {self.max_pages}.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+
+
 class CatDashboardView(discord.ui.LayoutView):
     def __init__(self, cog: "DailyCats", images: List[Tuple[int, bytes]], page: int = 0):
         super().__init__(timeout=300)
@@ -132,7 +159,7 @@ class CatDashboardView(discord.ui.LayoutView):
         header_container.add_item(
             discord.ui.TextDisplay(
                 f"# 🐱 Cat Image Dashboard\n"
-                f"Total Images: **{len(self.images)}** | Page **{self.page + 1}** of **{self.max_pages}**"
+                f"Total Images: **{len(self.images)}**"
             )
         )
         self.add_item(header_container)
@@ -189,16 +216,24 @@ class CatDashboardView(discord.ui.LayoutView):
         nav_row = discord.ui.ActionRow()
 
         prev_btn = discord.ui.Button(
-            label="◀ Previous",
-            style=discord.ButtonStyle.secondary,
+            emoji="◀️",
+            style=discord.ButtonStyle.primary,
             disabled=(self.page == 0)
         )
         prev_btn.callback = self.prev_page
         nav_row.add_item(prev_btn)
 
-        next_btn = discord.ui.Button(
-            label="Next ▶",
+        go_btn = discord.ui.Button(
+            label=f"Page {self.page + 1} of {self.max_pages}",
             style=discord.ButtonStyle.secondary,
+            disabled=(self.max_pages <= 1)
+        )
+        go_btn.callback = self.goto_page_callback
+        nav_row.add_item(go_btn)
+
+        next_btn = discord.ui.Button(
+            emoji="▶️",
+            style=discord.ButtonStyle.primary,
             disabled=(self.page >= self.max_pages - 1)
         )
         next_btn.callback = self.next_page
@@ -226,6 +261,9 @@ class CatDashboardView(discord.ui.LayoutView):
         if self.page < self.max_pages - 1:
             self.page += 1
             await self.refresh_dashboard(interaction)
+
+    async def goto_page_callback(self, interaction: Interaction):
+        await interaction.response.send_modal(CatGoToPageModal(self, self.max_pages))
 
     async def add_image_click(self, interaction: Interaction):
         await interaction.response.send_modal(AddImageModal(self.cog))
