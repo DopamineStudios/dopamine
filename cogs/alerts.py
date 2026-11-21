@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional, Set
 
 import discord
-from beacon import beacon_commands
+from beacon import beacon_commands, parse_command_links
 from discord.ext import commands
 
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
@@ -179,9 +179,13 @@ class Alerts(commands.Cog):
         async def send_reminder():
             await asyncio.sleep(4.0)
             try:
+                description = await parse_command_links(
+                    interaction.client,
+                    "You have an unread alert. Use </alert> to read it!"
+                )
                 embed = discord.Embed(
                     title="Unread Alert!",
-                    description="You have an unread alert. Use </alert:1473313910571536541> to read it!",
+                    description=description,
                     color=0xFFFFFF
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)

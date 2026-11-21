@@ -3,7 +3,7 @@ import re
 from typing import Dict, Set
 
 import discord
-from beacon import beacon_commands
+from beacon import beacon_commands, parse_command_links
 from discord import app_commands
 from discord.ext import commands
 
@@ -52,17 +52,18 @@ class PlaceholderModal(discord.ui.Modal, title="Change Placeholder Text"):
         if self.guild_id in self.cog.serversettingscache:
             self.cog.serversettingscache[self.guild_id]['placeholder'] = new_text
 
-        new_description = (
+        raw_description = (
             "This feature moderates the display name / nickname of all members in the server, and changes it to the 'placeholder' if any parameter is triggered.\n\n"
             "__There are two modes that can be toggled independently toggled__:\n\n"
             "* **Profanity Filter**: Moderates names containing blacklisted words.\n"
             "* **Symbols Filter**: Moderates names containing non-standard symbols.\n\n"
             f"The placeholder is currently set to: `{new_text}`\n\n"
             "__Additional Features__:\n\n"
-            "* **Manual Scan**: </nickname moderator scan:1456588612958425294> to initiate a manual, server-wide scan that will automatically update any member's display name based on your Nickname Moderator settings.\n"
-            "* **Logging**: Use the command </setlog:1428731733477556224> to enable logging.\n"
-            "* **Verification**: </nickname moderator verify:1456588612958425294> to verify a member to make them be ignored by the moderation, and </nickname moderator verified:1456588612958425294> to see the list of verified members.\n\n"
+            "* **Manual Scan**: </nickname moderator scan> to initiate a manual, server-wide scan that will automatically update any member's display name based on your Nickname Moderator settings.\n"
+            "* **Logging**: Use the command </setlog> to enable logging.\n"
+            "* **Verification**: </nickname moderator verify> to verify a member to make them be ignored by the moderation, and </nickname moderator verified> to see the list of verified members.\n\n"
         )
+        new_description = await parse_command_links(interaction.client, raw_description)
 
         embed = interaction.message.embeds[0]
         embed.description = new_description
@@ -445,17 +446,18 @@ class Nickname(commands.Cog):
 
         settings = self.serversettingscache.get(guild_id, {})
         placeholder = settings.get("placeholder", "Change your nickname")
-        embed_description = (
+        raw_description = (
             "This feature moderates the display name / nickname of all members in the server, and changes it to the 'placeholder' if any parameter is triggered.\n\n"
             "__There are two modes that can be toggled independently toggled__:\n\n"
             "* **Profanity Filter**: Moderates names containing blacklisted words.\n"
             "* **Symbols Filter**: Moderates names containing non-standard symbols.\n\n"
             f"The placeholder is currently set to: `{placeholder}`\n\n"
             "__Additional Features__:\n\n"
-            "* **Manual Scan**: </nickname moderator scan:1456588612958425294> to initiate a manual, server-wide scan that will automatically update any member's display name based on your Nickname Moderator settings.\n"
-            "* **Logging**: Use the command </setlog:1428731733477556224> to enable logging.\n"
-            "* **Verification**: </nickname moderator verify:1456588612958425294> to verify a member to make them be ignored by the moderation, and </nickname moderator verified:1456588612958425294> to see the list of verified members.\n\n"
+            "* **Manual Scan**: </nickname moderator scan> to initiate a manual, server-wide scan that will automatically update any member's display name based on your Nickname Moderator settings.\n"
+            "* **Logging**: Use the command </setlog> to enable logging.\n"
+            "* **Verification**: </nickname moderator verify> to verify a member to make them be ignored by the moderation, and </nickname moderator verified> to see the list of verified members.\n\n"
         )
+        embed_description = await parse_command_links(interaction.client, raw_description)
 
         embed = discord.Embed(
             title="Nickname Moderation",
@@ -473,9 +475,13 @@ class Nickname(commands.Cog):
         verified_ids = list(self.verifiedcache.get(guild_id, set()))
 
         if not verified_ids:
+            desc = await parse_command_links(
+                interaction.client,
+                "We searched our caches and databases far and wide but unfortunately, no members were found.\n\nTo verify a member, use </nickname moderator verify>"
+            )
             await interaction.response.send_message(embed=discord.Embed(
                 title="No verified members found",
-                description="We searched our caches and databases far and wide but unfortunately, no members were found.\n\nTo verify a member, use </nickname moderator verify:1456588612958425294>"
+                description=desc
             ), ephemeral=True)
             return
 
