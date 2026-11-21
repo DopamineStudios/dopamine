@@ -189,6 +189,9 @@ class AutoPublish(commands.Cog):
             "SELECT channel_id FROM autopublish_channels WHERE guild_id = ?", (guild.id,)
         )
 
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
+
         invalid_cids = []
         for r in rows:
             cid = r["channel_id"]
@@ -196,13 +199,23 @@ class AutoPublish(commands.Cog):
             if channel is None:
                 try:
                     channel = await self.bot.fetch_channel(cid)
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                except discord.NotFound:
                     channel = None
+                except (discord.Forbidden, discord.HTTPException):
+                    channel = guild.get_channel(cid) or object()
 
-            if not channel or not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id or not channel.is_news() or not channel.permissions_for(guild.me).send_messages:
-                invalid_cids.append((cid,))
-                self.cache.discard(cid)
-                result.actions.append(f"removed_channel_{cid}")
+            valid = channel is not None and isinstance(channel, discord.abc.GuildChannel) and channel.guild.id == guild.id and channel.is_news() and channel.permissions_for(guild.me).send_messages
+            if not valid:
+                key = (guild.id, cid)
+                fail_count = self._health_failures.get(key, 0) + 1
+                self._health_failures[key] = fail_count
+                if fail_count >= 2:
+                    invalid_cids.append((cid,))
+                    self.cache.discard(cid)
+                    result.actions.append(f"removed_channel_{cid}")
+            else:
+                key = (guild.id, cid)
+                self._health_failures[key] = 0
 
         if invalid_cids:
             async with self.bot.db.acquire_db() as db:

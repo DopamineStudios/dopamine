@@ -936,8 +936,10 @@ class RepeatingMessages(commands.Cog):
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return False
+            except discord.NotFound:
+                channel = None
+            except (discord.Forbidden, discord.HTTPException):
+                channel = guild.get_channel(channel_id) or object()
         if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
             return False
         perms = channel.permissions_for(guild.me)
@@ -945,17 +947,26 @@ class RepeatingMessages(commands.Cog):
 
     async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
         result = DataMonitorResult(feature_id="repeating_messages")
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
         for m_id, data in list(self.message_cache.get(guild.id, {}).items()):
             if not data.get("is_active"):
                 continue
-            if await self._channel_sendable(guild, data["channel_id"]):
+            sendable = await self._channel_sendable(guild, data["channel_id"])
+            if sendable:
+                key = (guild.id, m_id)
+                self._health_failures[key] = 0
                 continue
-            await self.bot.db.execute(
-                "UPDATE scheduled_messages SET is_active = 0 WHERE guild_id = ? AND message_id = ?",
-                (guild.id, m_id),
-            )
-            data["is_active"] = 0
-            result.actions.append(f"deactivated_message:{m_id}")
+            key = (guild.id, m_id)
+            fail_count = self._health_failures.get(key, 0) + 1
+            self._health_failures[key] = fail_count
+            if fail_count >= 2:
+                await self.bot.db.execute(
+                    "UPDATE scheduled_messages SET is_active = 0 WHERE guild_id = ? AND message_id = ?",
+                    (guild.id, m_id),
+                )
+                data["is_active"] = 0
+                result.actions.append(f"deactivated_message:{m_id}")
         return result
 
     @repeating.command(name="message", description="Open the Repeating Messages Dashboard")

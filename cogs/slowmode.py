@@ -380,8 +380,10 @@ class ScheduledSlowmode(commands.Cog):
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return False
+            except discord.NotFound:
+                channel = None
+            except (discord.Forbidden, discord.HTTPException):
+                channel = guild.get_channel(channel_id) or object()
         if not isinstance(channel, discord.TextChannel) or channel.guild.id != guild.id:
             return False
         perms = channel.permissions_for(guild.me)
@@ -393,8 +395,21 @@ class ScheduledSlowmode(commands.Cog):
             "SELECT DISTINCT channel_id FROM slowmode_schedules WHERE guild_id = ?", (guild.id,)
         )
         channel_ids = [row["channel_id"] for row in rows]
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
 
-        unmanageable_ids = [cid for cid in channel_ids if not await self._channel_manageable(guild, cid)]
+        unmanageable_ids = []
+        for cid in channel_ids:
+            manageable = await self._channel_manageable(guild, cid)
+            if not manageable:
+                key = (guild.id, cid)
+                fail_count = self._health_failures.get(key, 0) + 1
+                self._health_failures[key] = fail_count
+                if fail_count >= 2:
+                    unmanageable_ids.append(cid)
+            else:
+                key = (guild.id, cid)
+                self._health_failures[key] = 0
 
         if unmanageable_ids:
             async with self.bot.db.acquire_db() as db:

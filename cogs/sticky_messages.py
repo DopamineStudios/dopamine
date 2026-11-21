@@ -1061,8 +1061,10 @@ class StickyMessages(commands.Cog):
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return False
+            except discord.NotFound:
+                channel = None
+            except (discord.Forbidden, discord.HTTPException):
+                channel = guild.get_channel(channel_id) or object()
         if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
             return False
         perms = channel.permissions_for(guild.me)
@@ -1070,13 +1072,21 @@ class StickyMessages(commands.Cog):
 
     async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
         result = DataMonitorResult(feature_id="sticky_messages")
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
         for title in list(self.panel_cache.get(guild.id, {}).keys()):
             panel = self.panel_cache[guild.id][title]
             channel_id = panel.get("channel_id")
             if not channel_id or await self._channel_sendable(guild, channel_id):
+                key = (guild.id, title)
+                self._health_failures[key] = 0
                 continue
-            await self.delete_panel(guild.id, title)
-            result.actions.append(f"removed_panel:{title}")
+            key = (guild.id, title)
+            fail_count = self._health_failures.get(key, 0) + 1
+            self._health_failures[key] = fail_count
+            if fail_count >= 2:
+                await self.delete_panel(guild.id, title)
+                result.actions.append(f"removed_panel:{title}")
         return result
 
     @sticky_group.command(name="message", description="Open the Sticky Message Dashboard")

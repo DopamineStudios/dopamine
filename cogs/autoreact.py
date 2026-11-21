@@ -765,8 +765,10 @@ class AutoReact(commands.Cog):
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return False
+            except discord.NotFound:
+                channel = None
+            except (discord.Forbidden, discord.HTTPException):
+                channel = guild.get_channel(channel_id) or object()
         if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
             return False
         perms = channel.permissions_for(guild.me)
@@ -774,17 +776,26 @@ class AutoReact(commands.Cog):
 
     async def data_monitor_guild(self, guild: discord.Guild) -> DataMonitorResult:
         result = DataMonitorResult(feature_id="autoreact")
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
         for (g_id, panel_id), panel in list(self.panel_cache.items()):
             if g_id != guild.id or not panel.get("is_active"):
                 continue
-            if await self._channel_sendable(guild, panel["channel_id"]):
-                continue
-            await self.bot.db.execute(
-                "UPDATE autoreact_panels SET is_active = 0 WHERE guild_id = ? AND panel_id = ?",
-                (g_id, panel_id),
-            )
-            panel["is_active"] = 0
-            result.actions.append(f"deactivated_panel:{panel_id}")
+            valid = await self._channel_sendable(guild, panel["channel_id"])
+            if not valid:
+                key = (guild.id, panel_id)
+                fail_count = self._health_failures.get(key, 0) + 1
+                self._health_failures[key] = fail_count
+                if fail_count >= 2:
+                    await self.bot.db.execute(
+                        "UPDATE autoreact_panels SET is_active = 0 WHERE guild_id = ? AND panel_id = ?",
+                        (g_id, panel_id),
+                    )
+                    panel["is_active"] = 0
+                    result.actions.append(f"deactivated_panel:{panel_id}")
+            else:
+                key = (guild.id, panel_id)
+                self._health_failures[key] = 0
         return result
 
     @commands.Cog.listener()

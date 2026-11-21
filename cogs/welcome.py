@@ -587,6 +587,7 @@ class Welcome(commands.Cog):
         self.welcome_cache: Dict[int, dict] = {}
         self.image_bytes_cache: Dict[int, bytes] = {}
         self.member_count_cache: Dict[int, int] = {}
+        self._health_failures: Dict[int, int] = {}
         register_font(BOLDFONT_PATH)
         register_font(MEDIUMFONT_PATH)
 
@@ -1026,16 +1027,24 @@ class Welcome(commands.Cog):
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            except discord.NotFound:
                 channel = None
+            except (discord.Forbidden, discord.HTTPException):
+                channel = guild.get_channel(channel_id) or object()
 
-        if not channel or not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id or not channel.permissions_for(guild.me).send_messages:
-            async with self.bot.db.acquire_db() as db:
-                await db.execute("UPDATE welcome_settings SET is_enabled = 0 WHERE guild_id = ?", (guild.id,))
-                await db.commit()
-            if guild.id in self.welcome_cache:
-                self.welcome_cache[guild.id]["is_enabled"] = 0
-            result.actions.append("disabled_welcome")
+        valid = channel is not None and isinstance(channel, discord.abc.GuildChannel) and channel.guild.id == guild.id and channel.permissions_for(guild.me).send_messages
+        if not valid:
+            fail_count = self._health_failures.get(guild.id, 0) + 1
+            self._health_failures[guild.id] = fail_count
+            if fail_count >= 2:
+                async with self.bot.db.acquire_db() as db:
+                    await db.execute("UPDATE welcome_settings SET is_enabled = 0 WHERE guild_id = ?", (guild.id,))
+                    await db.commit()
+                if guild.id in self.welcome_cache:
+                    self.welcome_cache[guild.id]["is_enabled"] = 0
+                result.actions.append("disabled_welcome")
+        else:
+            self._health_failures[guild.id] = 0
 
         return result
 

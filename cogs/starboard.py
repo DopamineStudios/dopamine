@@ -706,8 +706,10 @@ class StarboardCog(commands.Cog):
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return False
+            except discord.NotFound:
+                channel = None
+            except (discord.Forbidden, discord.HTTPException):
+                channel = guild.get_channel(channel_id) or object()
         if not isinstance(channel, discord.abc.GuildChannel) or channel.guild.id != guild.id:
             return False
         perms = channel.permissions_for(guild.me)
@@ -719,10 +721,17 @@ class StarboardCog(commands.Cog):
         if not settings or not settings.get("enabled"):
             return result
         channel_id = settings.get("starboard_channel_id")
-        if await self._board_channel_accessible(guild, channel_id):
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
+        accessible = await self._board_channel_accessible(guild, channel_id)
+        if accessible:
+            self._health_failures[guild.id] = 0
             return result
-        await self.update_guild_setting(guild.id, enabled=0)
-        result.actions.append("disabled_starboard")
+        fail_count = self._health_failures.get(guild.id, 0) + 1
+        self._health_failures[guild.id] = fail_count
+        if fail_count >= 2:
+            await self.update_guild_setting(guild.id, enabled=0)
+            result.actions.append("disabled_starboard")
         return result
 
 

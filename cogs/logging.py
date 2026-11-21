@@ -205,12 +205,18 @@ class Logging(commands.Cog):
         channel_id = await self.manager.log_get(guild.id)
         if not channel_id:
             return result
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
+
         channel = guild.get_channel(channel_id)
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            except discord.NotFound:
                 channel = None
+            except (discord.Forbidden, discord.HTTPException):
+                channel = guild.get_channel(channel_id) or object()
+
         accessible = (
             channel is not None
             and isinstance(channel, discord.abc.GuildChannel)
@@ -219,8 +225,13 @@ class Logging(commands.Cog):
             and channel.permissions_for(guild.me).send_messages
         )
         if not accessible:
-            await self.manager.log_remove(guild.id)
-            result.actions.append("disabled_logging")
+            fail_count = self._health_failures.get(guild.id, 0) + 1
+            self._health_failures[guild.id] = fail_count
+            if fail_count >= 2:
+                await self.manager.log_remove(guild.id)
+                result.actions.append("disabled_logging")
+        else:
+            self._health_failures[guild.id] = 0
         return result
 
 

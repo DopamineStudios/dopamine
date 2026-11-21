@@ -425,26 +425,6 @@ class Data(commands.Cog):
                     continue
                 await cog.data_delete_guild(guild_id, feature_id)
 
-    def is_passive_feature(self, target: Any) -> bool:
-        """Check if a cog or feature_id is an exempt passive background service."""
-        if isinstance(target, str):
-            if target in PASSIVE_FEATURES:
-                return True
-            cog = self._get_cog_for_feature(target)
-        else:
-            cog = target
-
-        if cog and hasattr(cog, "data_features"):
-            try:
-                feats = cog.data_features()
-                if feats and any(
-                    getattr(f, "is_passive", False) or getattr(f, "passive", False)
-                    for f in feats
-                ):
-                    return True
-            except Exception:
-                pass
-        return False
 
     async def on_feature_access_failure(self, guild_id: int, feature_id: str, detail: str = ""):
         guild = self.bot.get_guild(guild_id)

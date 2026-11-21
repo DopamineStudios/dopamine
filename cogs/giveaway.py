@@ -1,6 +1,5 @@
 import asyncio
 import random
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Set
@@ -2433,14 +2432,19 @@ class Giveaways(commands.Cog):
             "SELECT giveaway_id, channel_id FROM giveaways WHERE guild_id = ? AND ended = 0",
             (guild.id,),
         )
+        if not hasattr(self, "_health_failures"):
+            self._health_failures = {}
+
         for row in rows:
             giveaway_id, channel_id = row["giveaway_id"], row["channel_id"]
             channel = guild.get_channel(channel_id)
             if channel is None:
                 try:
                     channel = await self.bot.fetch_channel(channel_id)
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                except discord.NotFound:
                     channel = None
+                except (discord.Forbidden, discord.HTTPException):
+                    channel = guild.get_channel(channel_id) or object()
             accessible = (
                 channel is not None
                 and isinstance(channel, discord.abc.GuildChannel)
@@ -2449,8 +2453,15 @@ class Giveaways(commands.Cog):
                 and channel.permissions_for(guild.me).read_message_history
             )
             if not accessible:
-                await self.end_giveaway(giveaway_id, guild.id)
-                result.actions.append(f"ended_giveaway:{giveaway_id}")
+                key = (guild.id, giveaway_id)
+                fail_count = self._health_failures.get(key, 0) + 1
+                self._health_failures[key] = fail_count
+                if fail_count >= 2:
+                    await self.end_giveaway(giveaway_id, guild.id)
+                    result.actions.append(f"ended_giveaway:{giveaway_id}")
+            else:
+                key = (guild.id, giveaway_id)
+                self._health_failures[key] = 0
         return result
 
 
