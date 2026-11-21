@@ -1,23 +1,21 @@
 ﻿
 # Dopamine
 
-The Premium Experience, Minus the paywalls and nick-and-diming. Dopamine is a moderation and utility bot built to be easy to use and customisable while remaining 100% free to use with no paywalls. If it exists in the bot, you can use it, no strings attached.
+The Premium Experience, Minus the paywalls. Dopamine is an infraction-based moderation and utility bot built to be easy to use and customisable while remaining 100% free to use with no paywalls, with easy-to-use in-Discord UI rather than needing to navigate external dashoards. If it exists in the bot, you can use it, no strings attached.
 
 Created by **Dopamine Studios**.
 
 # Invite Dopamine
 
-Invite Dopamine today by [__clicking here__](https://discord.com/oauth2/authorize?client_id=1411266382380924938).
+Invite Dopamine today by [clicking here](https://discord.com/oauth2/authorize?client_id=1411266382380924938).
 
-If you have any questions, suggestions, or issues, you can join the support server by clicking [__here__](https://discord.gg/b3eUjydwcQ).
+If you have any questions, suggestions, or issues, you can join the support server by [clicking here](https://discord.gg/b3eUjydwcQ).
 
 # Features
 
 ### Moderation & Administration
 
-* Moderation System: A completely customisable, infraction-case-based moderation system where actions (warn, ban, etc.) are triggered when a defined warning count is reached. Includes infraction cases, warning decay feature, and rejoin policy feature. Also supports Message Reporting.
-
-* Slowmode Scheduler: Schedule slowmode to enable/disable automatically at specific times of the day.
+* Moderation System: A completely customisable, infraction-case-based moderation system where actions (warn, ban, etc.) are abstracted and triggered when a defined warning count is reached, instead of using traditional warn, ban, mute, etc. commands. Includes infraction cases, warning decay feature, and rejoin policy feature. Also supports Message Reporting.
 
 * Comprehensive Logging: Detailed logs for all moderator actions and bot activities.
 
@@ -33,25 +31,27 @@ If you have any questions, suggestions, or issues, you can join the support serv
 
 * Global Notes: Store and retrieve notes across any server where the bot is present (requires user-install/profile addition).
 
+* Daily Cat Pics: Posts a picture of a cute cat in a channel every day.
+
 # Why Dopamine?
 
-| Feature                            |     **Dopamine**     | **Other Corporate Bots** |
-|:-----------------------------------|:--------------------:|:------------------------:|
-| **Completely Free To Use**         |        **✅**         |          **❌**           |
-| **Multi-Purpose**                  |        **✅**         |          **✅**           |
-| **Zero Paywalls**                  |        **✅**         |          **❌**           |
-| **Open Source**                    | **✅** |          **❌**           |
-| **Advanced Moderation**            |     **✅**     |          **❌**           |
-| **Easy-To-Use in-Discord UI**      |   **✅**    |          **❌**           |
-| **24/7 Uptime**                    |   **✅**    |          **✅**           |
-| **Zero Data Selling Policy**       |  **✅**   |          **❌**           |
-| **Self-Hostable**                  | **✅**  |          **❌**           |
-| **User-first Philosophy**          | **✅**  |          **❌**           |
-| **Gives you that hit of Dopamine** | **✅**  |          **❌**           |
+| Feature                            | **Dopamine** | **Typical Corporate Bots** |
+|:-----------------------------------|:------------:|:--------------------------:|
+| **Completely Free To Use**         |    **✅**    |           **❌**           |
+| **Multi-Purpose**                  |    **✅**    |           **✅**           |
+| **Zero Paywalls**                  |    **✅**    |           **❌**           |
+| **Open Source**                    |    **✅**    |           **❌**           |
+| **Infraction-based Moderation**    |    **✅**    |           **❌**           |
+| **Easy-To-Use in-Discord UI**      |    **✅**    |           **❌**           |
+| **24/7 Uptime**                    |    **✅**    |           **✅**           |
+| **Zero Data Selling Policy**       |    **✅**    |           **❌**           |
+| **Self-Hostable**                  |    **✅**    |           **❌**           |
+| **User-first Philosophy**          |    **✅**    |           **❌**           |
+| **Gives you that hit of Dopamine** |    **✅**    |           **❌**           |
 
 # The Team
 
-Dopamine is developed by **Dopamine Studios**. The current team comprises of **Smite** and **Pivot**.
+Dopamine is developed by **Dopamine Studios**. The current team consists of **Smite** and **Pivot**.
 
 ---
 

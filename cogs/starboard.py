@@ -511,7 +511,7 @@ class StarboardCog(commands.Cog):
                 return
 
             dynamic_emoji = self.get_star_emoji(total_count)
-            content_str = f"{dynamic_emoji} **{total_count}** | {msg.channel.mention}"
+            content_str = f"{dynamic_emoji} **{total_count}** | {msg.author.mention}"
 
             if existing_ids:
                 status_id, fwd_id = existing_ids
@@ -639,7 +639,7 @@ class StarboardCog(commands.Cog):
         star_react = next((r for r in ref.reactions if str(r.emoji) == self.STAR_EMOJI), None)
         count = star_react.count if star_react else 1
 
-        content_str = f"⭐️ **{count}** | {ref.channel.mention}"
+        content_str = f"⭐️ **{count}** | {ref.author.mention}"
         channel = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
         status_msg = await channel.send(content=content_str)
         fwd_msg = await ref.forward(destination=channel)

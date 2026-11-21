@@ -1,4 +1,3 @@
-import asyncio
 import json
 import re
 import time
@@ -6,7 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Set
 
 import discord
-from beacon import PrivateLayoutView, beacon_commands
+from beacon import PrivateLayoutView, DestructiveConfirmationView, beacon_commands
 from discord.ext import commands
 from rapidfuzz import fuzz
 
@@ -121,63 +120,7 @@ class GoToPageModal(discord.ui.Modal):
         await interaction.response.edit_message(view=self.parent_view)
 
 
-class DestructiveConfirmationView(PrivateLayoutView):
-    def __init__(self, user, record_id, cog, guild_id):
-        super().__init__(user, timeout=30)
-        self.record_id = record_id
-        self.cog = cog
-        self.color = None
-        self.guild_id = guild_id
-        self.value = None
-        self.title_text = "Delete Autoresponse"
-        self.body_text = f"Are you sure you want to permanently delete the Autoresponse? This cannot be undone."
-        self.build_layout()
 
-    def build_layout(self):
-        self.clear_items()
-        container = discord.ui.Container(accent_color=self.color)
-        container.add_item(discord.ui.TextDisplay(f"### {self.title_text}"))
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(self.body_text))
-
-        is_disabled = self.value is not None
-        action_row = discord.ui.ActionRow()
-        cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.gray, disabled=is_disabled)
-        confirm = discord.ui.Button(label="Delete Permanently", style=discord.ButtonStyle.red, disabled=is_disabled)
-
-        cancel.callback = self.cancel_callback
-        confirm.callback = self.confirm_callback
-
-        action_row.add_item(cancel)
-        action_row.add_item(confirm)
-        container.add_item(discord.ui.Separator())
-        container.add_item(action_row)
-
-        self.add_item(container)
-
-    async def update_view(self, interaction: discord.Interaction, title: str, color: discord.Color):
-        self.title_text = title
-        self.body_text = f"~~{self.body_text}~~"
-        self.build_layout()
-        if interaction.response.is_done():
-            await interaction.edit_original_response(view=self)
-        else:
-            await interaction.response.edit_message(view=self)
-        self.stop()
-
-    async def cancel_callback(self, interaction: discord.Interaction):
-        self.value = False
-        await self.update_view(interaction, "Action Canceled", discord.Color(0xdf5046))
-
-    async def confirm_callback(self, interaction: discord.Interaction):
-        self.value = True
-        await self.cog.delete_autoresponse(self.guild_id, self.record_id)
-        await self.update_view(interaction, "Action Confirmed", discord.Color.green())
-
-    async def on_timeout(self, interaction: discord.Interaction):
-        if self.value is None:
-            self.value = False
-            await self.update_view(interaction, "Timed Out", discord.Color(0xdf5046))
 
 
 class AutoresponseDashboard(PrivateLayoutView):
@@ -458,9 +401,17 @@ class EditAutoresponsePage(PrivateLayoutView):
             await interaction.response.edit_message(view=self)
 
         async def delete_callback(interaction: discord.Interaction):
-            view = DestructiveConfirmationView(user=interaction.user, record_id=self.record.id, cog=self.cog,
-                                               guild_id=self.guild_id)
+            async def do_delete():
+                await self.cog.delete_autoresponse(self.guild_id, self.record.id)
+
+            view = DestructiveConfirmationView(
+                user=interaction.user,
+                title_text="Delete Autoresponse",
+                body_text="Are you sure you want to permanently delete the Autoresponse? This cannot be undone.",
+                on_confirmation_callback=do_delete
+            )
             await interaction.response.send_message(view=view)
+            view.message = await interaction.original_response()
 
         async def return_dashboard_callback(interaction: discord.Interaction):
             autoresponses = self.cog.get_guild_autoresponses(self.guild_id)

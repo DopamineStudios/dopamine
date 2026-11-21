@@ -288,14 +288,19 @@ class FeatureBrowserPage(PrivateLayoutView):
                 discord.ui.TextDisplay(f"### {title}"),
                 accessory=btn,
             ))
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page} of {total}"))
         nav = discord.ui.ActionRow()
         prev_b = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
+        page_b = discord.ui.Button(
+            label=f"Page {self.page} of {total}",
+            style=discord.ButtonStyle.secondary,
+            disabled=total <= 1,
+        )
         next_b = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=self.page >= total)
         prev_b.callback = self._prev
+        page_b.callback = self._goto
         next_b.callback = self._next
         nav.add_item(prev_b)
+        nav.add_item(page_b)
         nav.add_item(next_b)
         container.add_item(nav)
         toggle = discord.ui.Button(
@@ -303,6 +308,7 @@ class FeatureBrowserPage(PrivateLayoutView):
             style=discord.ButtonStyle.danger if self.delete_mode else discord.ButtonStyle.secondary,
         )
         toggle.callback = self._toggle_delete
+        container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.ActionRow(toggle))
         back = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
         back.callback = self._back
@@ -639,9 +645,10 @@ class InsightsFeaturePage(PrivateLayoutView):
         container.add_item(discord.ui.Separator())
         nav = discord.ui.ActionRow()
         prev_b = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
-        page_b = discord.ui.Button(label=f"Page {self.page} of {total}", style=discord.ButtonStyle.secondary, disabled=True)
+        page_b = discord.ui.Button(label=f"Page {self.page} of {total}", style=discord.ButtonStyle.secondary, disabled=total <= 1)
         next_b = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary, disabled=self.page >= total)
         prev_b.callback = self._prev
+        page_b.callback = self._goto_page
         next_b.callback = self._next
         nav.add_item(prev_b)
         nav.add_item(page_b)
@@ -662,6 +669,10 @@ class InsightsFeaturePage(PrivateLayoutView):
         self.page += 1
         self.build_layout()
         await interaction.response.edit_message(view=self)
+
+    async def _goto_page(self, interaction: discord.Interaction):
+        total = max(1, (len(self.rows) + self.per_page - 1) // self.per_page)
+        await interaction.response.send_modal(DataGoToModal(self, total))
 
     async def _back(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=InsightsDashboard(self.cog, self.user))
@@ -831,12 +842,13 @@ class RemovalFeedbackListPage(PrivateLayoutView):
         page_b = discord.ui.Button(
             label=f"Page {self.page} of {total_pages}",
             style=discord.ButtonStyle.secondary,
-            disabled=True,
+            disabled=total_pages <= 1,
         )
         next_b = discord.ui.Button(
             emoji="▶️", style=discord.ButtonStyle.primary, disabled=self.page >= total_pages
         )
         prev_b.callback = self._prev
+        page_b.callback = self._goto_page
         next_b.callback = self._next
         nav_row.add_item(prev_b)
         nav_row.add_item(page_b)
@@ -877,5 +889,38 @@ class RemovalFeedbackListPage(PrivateLayoutView):
         self.build_layout()
         await interaction.response.edit_message(view=self)
 
+    async def _goto_page(self, interaction: discord.Interaction):
+        total_pages = max(1, (self.total_count + self.per_page - 1) // self.per_page)
+        await interaction.response.send_modal(DataGoToModal(self, total_pages))
+
     async def _back(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=InsightsDashboard(self.cog, self.user))
+
+
+class DataGoToModal(discord.ui.Modal):
+    def __init__(self, parent_view, total_pages: int):
+        super().__init__(title="Jump to Page")
+        self.parent_view = parent_view
+        self.total_pages = total_pages
+        self.page_input = discord.ui.TextInput(
+            label=f"Page Number (1-{total_pages})",
+            placeholder="Enter a page number...",
+            min_length=1,
+            max_length=5,
+            required=True
+        )
+        self.add_item(self.page_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            page_num = int(self.page_input.value)
+            if 1 <= page_num <= self.total_pages:
+                self.parent_view.page = page_num
+                if hasattr(self.parent_view, "fetch_data"):
+                    await self.parent_view.fetch_data()
+                self.parent_view.build_layout()
+                await interaction.response.edit_message(view=self.parent_view)
+            else:
+                await interaction.response.send_message(f"Enter a number between 1 and {self.total_pages}.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Please enter a valid number.", ephemeral=True)

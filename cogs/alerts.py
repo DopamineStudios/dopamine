@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Optional, Set
+from typing import Optional, Set
 
 import discord
-from beacon import beacon_commands
+from beacon import beacon_commands, parse_command_links
 from discord.ext import commands
 
 from utils.data_protocol import DataDeleteResult, DataExportChunk, DataFeatureMeta, DataMonitorResult
@@ -28,18 +27,18 @@ class Alerts(commands.Cog):
 
         self._current_alert: Optional[CurrentAlert] = None
         self._read_users: Set[int] = set()
-        self._reminder_cooldowns: Dict[int, float] = {}
+        self._reminded_users: Set[int] = set()
 
     async def cog_load(self):
         await self.bot.db.wait_ready()
         await self.populate_caches()
 
     async def cog_unload(self):
-        self._reminder_cooldowns.clear()
+        self._reminded_users.clear()
 
     async def populate_caches(self):
         self._read_users.clear()
-        self._reminder_cooldowns.clear()
+        self._reminded_users.clear()
 
         rows = await self.bot.db.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 1")
         if rows:
@@ -56,6 +55,11 @@ class Alerts(commands.Cog):
                 (self._current_alert.id,)
             )
             self._read_users = {r["user_id"] for r in read_rows}
+            rem_rows = await self.bot.db.execute(
+                "SELECT user_id FROM alert_reminded WHERE alert_id = ?",
+                (self._current_alert.id,)
+            )
+            self._reminded_users = {r["user_id"] for r in rem_rows}
         else:
             self._current_alert = None
 
@@ -79,6 +83,7 @@ class Alerts(commands.Cog):
 
             async with self.parent_cog.bot.db.acquire_db() as db:
                 await db.execute("DELETE FROM alert_reads")
+                await db.execute("DELETE FROM alert_reminded")
                 await db.execute("DELETE FROM alerts")
                 await db.execute(
                     "INSERT INTO alerts (title, description, created_at, read_count) VALUES (?, ?, ?, 0)",
@@ -93,7 +98,7 @@ class Alerts(commands.Cog):
                 id=new_id, title=title, description=desc, created_at=now_ts, read_count=0
             )
             self.parent_cog._read_users.clear()
-            self.parent_cog._reminder_cooldowns.clear()
+            self.parent_cog._reminded_users.clear()
 
             await interaction.response.send_message("Alert pushed and cache synced successfully!", ephemeral=True)
 
@@ -148,7 +153,7 @@ class Alerts(commands.Cog):
         embed.set_footer(text=f"You are #{position} to read this alert!")
         embed.set_author(name="Alert from the Developer")
         embed.timestamp = datetime.fromtimestamp(alert.created_at)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
@@ -158,23 +163,29 @@ class Alerts(commands.Cog):
             return
 
         user_id = interaction.user.id
-        now = time.time()
 
-        if user_id in self._read_users:
+        if user_id in self._read_users or user_id in self._reminded_users:
             return
 
-        expiry = self._reminder_cooldowns.get(user_id)
-        if expiry and expiry > now:
-            return
+        self._reminded_users.add(user_id)
 
-        self._reminder_cooldowns[user_id] = now + 300.0
+        async with self.bot.db.acquire_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO alert_reminded (alert_id, user_id) VALUES (?, ?)",
+                (self._current_alert.id, user_id)
+            )
+            await db.commit()
 
         async def send_reminder():
             await asyncio.sleep(4.0)
             try:
+                description = await parse_command_links(
+                    interaction.client,
+                    "You have an unread alert. Use </alert> to read it!"
+                )
                 embed = discord.Embed(
                     title="Unread Alert!",
-                    description="You have an unread alert. Use </alert:1473313910571536541> to read it!",
+                    description=description,
                     color=0xFFFFFF
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
@@ -199,6 +210,12 @@ class Alerts(commands.Cog):
         )
         if rows:
             chunk.global_data["alert_reads"] = rows
+        rem_rows = await self.bot.db.execute(
+            "SELECT alert_id, user_id FROM alert_reminded WHERE user_id = ?",
+            (user_id,),
+        )
+        if rem_rows:
+            chunk.global_data["alert_reminded"] = rem_rows
         return chunk
 
     async def data_export_guild(self, guild_id: int) -> DataExportChunk:
@@ -208,13 +225,18 @@ class Alerts(commands.Cog):
         if feature_id and feature_id != "alerts":
             return DataDeleteResult(feature_id="alerts")
 
-        count_rows = await self.bot.db.execute(
+        count_reads = await self.bot.db.execute(
             "SELECT COUNT(*) AS cnt FROM alert_reads WHERE user_id = ?", (user_id,)
         )
-        rows_affected = int(count_rows[0]["cnt"]) if count_rows else 0
+        count_rems = await self.bot.db.execute(
+            "SELECT COUNT(*) AS cnt FROM alert_reminded WHERE user_id = ?", (user_id,)
+        )
+        rows_affected = (int(count_reads[0]["cnt"]) if count_reads else 0) + (int(count_rems[0]["cnt"]) if count_rems else 0)
 
         await self.bot.db.execute("DELETE FROM alert_reads WHERE user_id = ?", (user_id,))
+        await self.bot.db.execute("DELETE FROM alert_reminded WHERE user_id = ?", (user_id,))
         self._read_users.discard(user_id)
+        self._reminded_users.discard(user_id)
         return DataDeleteResult(feature_id="alerts", deleted=True, rows_affected=rows_affected)
 
     async def data_delete_guild(self, guild_id: int, feature_id: str | None) -> DataDeleteResult:

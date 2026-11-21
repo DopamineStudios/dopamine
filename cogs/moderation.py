@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import Dict, Optional, List, Any, Union
 
 import discord
-from beacon import PrivateLayoutView, beacon_commands
+from beacon import PrivateLayoutView, ConfirmationView, DestructiveConfirmationView, beacon_commands
 from discord import app_commands
 from discord.ext import commands, tasks
 from natsort import natsorted, ns
@@ -87,204 +87,10 @@ def format_punishment_label(action: Optional[str], duration: Optional[Union[time
     return f"{action}ed from the server."
 
 
-class ConfirmationView(PrivateLayoutView):
-    def __init__(self, user, cog, title_text: str, body_text: str, color: discord.Color = None):
-        super().__init__(user, timeout=30)
-        self.value = None
-        self.cog = cog
-        self.title_text = title_text
-        self.body_text = body_text
-        self.color = color
-        self.message: discord.Message = None
-        self.build_layout()
-
-    def build_layout(self):
-        self.clear_items()
-        container = discord.ui.Container(accent_color=self.color)
-        container.add_item(discord.ui.TextDisplay(f"### {self.title_text}"))
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(self.body_text))
-
-        if self.value is None:
-            action_row = discord.ui.ActionRow()
-            cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.red)
-            confirm = discord.ui.Button(label="Confirm", style=discord.ButtonStyle.green)
-
-            cancel.callback = self.cancel_callback
-            confirm.callback = self.confirm_callback
-
-            action_row.add_item(cancel)
-            action_row.add_item(confirm)
-            container.add_item(discord.ui.Separator())
-            container.add_item(action_row)
-
-        self.add_item(container)
-
-    async def update_view(self, interaction: discord.Interaction, title: str, color: discord.Color):
-        self.title_text = title
-        self.body_text = f"~~{self.body_text}~~"
-        self.color = color
-        self.build_layout()
-
-        if interaction.response.is_done():
-            await interaction.edit_original_response(view=self)
-        else:
-            await interaction.response.edit_message(view=self)
-        self.stop()
-
-    async def cancel_callback(self, interaction: discord.Interaction):
-        self.value = False
-        await self.update_view(interaction, "Action Canceled", discord.Color(0xdf5046))
-
-    async def confirm_callback(self, interaction: discord.Interaction):
-        self.value = True
-        await self.update_view(interaction, "Action Confirmed", discord.Color.green())
-
-    async def on_timeout(self, interaction: discord.Interaction):
-        if self.value is None and self.message:
-            await self.update_view(interaction, "Timed Out", discord.Color(0xdf5046))
-            self.stop()
 
 
-class DestructiveConfirmationView(PrivateLayoutView):
-    def __init__(self, user, cog, title_text: str, body_text: str, color: discord.Color = None):
-        super().__init__(user, timeout=30)
-        self.value = None
-        self.cog = cog
-        self.title_text = title_text
-        self.body_text = body_text
-        self.color = color
-        self.message: discord.Message = None
-        self.build_layout()
-
-    def build_layout(self):
-        self.clear_items()
-        container = discord.ui.Container(accent_color=self.color)
-        container.add_item(discord.ui.TextDisplay(f"### {self.title_text}"))
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(self.body_text))
-
-        if self.value is None:
-            action_row = discord.ui.ActionRow()
-            cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
-            confirm = discord.ui.Button(label="Confirm", style=discord.ButtonStyle.danger)
-
-            cancel.callback = self.cancel_callback
-            confirm.callback = self.confirm_callback
-
-            action_row.add_item(cancel)
-            action_row.add_item(confirm)
-            container.add_item(discord.ui.Separator())
-            container.add_item(action_row)
-
-        self.add_item(container)
-
-    async def update_view(self, interaction: discord.Interaction, title: str, color: discord.Color):
-        self.title_text = title
-        self.body_text = f"~~{self.body_text}~~"
-        self.color = color
-        self.build_layout()
-
-        if interaction.response.is_done():
-            await interaction.edit_original_response(view=self)
-        else:
-            await interaction.response.edit_message(view=self)
-        self.stop()
-
-    async def cancel_callback(self, interaction: discord.Interaction):
-        self.value = False
-        await self.update_view(interaction, "Action Canceled", discord.Color(0xdf5046))
-
-    async def confirm_callback(self, interaction: discord.Interaction):
-        self.value = True
-        await self.update_view(interaction, "Action Confirmed", discord.Color.green())
-
-    async def on_timeout(self, interaction: discord.Interaction):
-        if self.value is None and self.message:
-            await self.update_view(interaction, "Timed Out", discord.Color(0xdf5046))
-            self.stop()
 
 
-class CaseDeleteConfirmationView(PrivateLayoutView):
-    def __init__(self, user, cog, guild: discord.Guild, case: dict, term: str, body_text: str, title: str):
-        super().__init__(user, timeout=60)
-        self.value = None
-        self.cog = cog
-        self.guild = guild
-        self.case = case
-        self.term = term
-        self.body_text = body_text
-        self.title = title
-        self.message: discord.Message = None
-        self.build_layout()
-
-    def build_layout(self):
-        self.clear_items()
-        container = discord.ui.Container(accent_color=discord.Color(0xdf5046))
-        container.add_item(discord.ui.TextDisplay(f"### {self.title}"))
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(self.body_text))
-
-        if self.value is None:
-            term_cap = self.term.title()
-            action_row = discord.ui.ActionRow()
-            cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
-            points_only = discord.ui.Button(
-                label=f"Adjust {term_cap}s Only",
-                style=discord.ButtonStyle.danger,
-            )
-            reverse = discord.ui.Button(
-                label=f"Adjust {term_cap}s and Reverse Punishment",
-                style=discord.ButtonStyle.danger,
-            )
-
-            cancel.callback = self.cancel_callback
-            points_only.callback = self.points_only_callback
-            reverse.callback = self.reverse_callback
-
-            action_row.add_item(cancel)
-            action_row.add_item(points_only)
-            action_row.add_item(reverse)
-            container.add_item(discord.ui.Separator())
-            container.add_item(action_row)
-
-        self.add_item(container)
-
-    async def update_view(self, interaction: discord.Interaction, title: str, color: discord.Color):
-        self.body_text = f"~~{self.body_text}~~"
-        self.build_layout()
-
-        if interaction.response.is_done():
-            await interaction.edit_original_response(view=self)
-        else:
-            await interaction.response.edit_message(view=self)
-        self.stop()
-
-    async def cancel_callback(self, interaction: discord.Interaction):
-        self.value = False
-        await self.update_view(interaction, "Action Canceled", discord.Color(0xdf5046))
-
-    async def points_only_callback(self, interaction: discord.Interaction):
-        self.value = "points_only"
-        await interaction.response.defer()
-        await self.cog.execute_case_delete(interaction, self.guild, self.case, reverse=False)
-        await self.update_view(interaction, "Case Deleted", discord.Color.green())
-
-    async def reverse_callback(self, interaction: discord.Interaction):
-        self.value = "reverse"
-        await interaction.response.defer()
-        await self.cog.execute_case_delete(interaction, self.guild, self.case, reverse=True)
-        await self.update_view(interaction, "Case Deleted", discord.Color.green())
-
-    async def on_timeout(self):
-        if self.value is None and self.message:
-            try:
-                self.body_text = f"~~{self.body_text}~~"
-                self.build_layout()
-                await self.message.edit(view=self)
-            except Exception:
-                pass
-            self.stop()
 
 
 class UndoActionView(discord.ui.View):
@@ -385,16 +191,33 @@ class ActionModal(discord.ui.Modal):
             conflict = next((a for a in existing if a['points'] == points_val), None)
 
             if conflict:
+                async def do_confirm():
+                    if self.is_create:
+                        await self.cog.bot.db.execute(
+                            "INSERT INTO actions (guild_id, action_type, duration, points) VALUES (?, ?, ?, ?)",
+                            (self.guild_id, act_type, dur_seconds, points_val)
+                        )
+                    else:
+                        await self.cog.bot.db.execute(
+                            "UPDATE actions SET points = ? WHERE id = ? AND guild_id = ?",
+                            (points_val, self.existing_action_id, self.guild_id)
+                        )
+                    await self.cog.refresh_action_cache(self.guild_id)
+                    view_page = CustomisationPage(interaction.user, self.cog)
+                    if interaction.response.is_done():
+                        await interaction.edit_original_response(view=view_page, content=None, embed=None)
+                    else:
+                        await interaction.response.edit_message(view=view_page, content=None, embed=None)
+
                 view = ConfirmationView(
-                    interaction.user, self.cog,
-                    "Point Conflict",
-                    f"An action already exists at **{points_val}** points. Do you want to add this action anyway, triggering BOTH?"
+                    user=interaction.user,
+                    title_text="Point Conflict",
+                    body_text=f"An action already exists at **{points_val}** points. Do you want to add this action anyway, triggering BOTH?",
+                    on_confirmation_callback=do_confirm
                 )
                 await interaction.response.send_message(view=view)
                 view.message = await interaction.original_response()
-                await view.wait()
-                if not view.value:
-                    return
+                return
 
             if self.is_create:
                 await self.cog.bot.db.execute(
@@ -1237,8 +1060,15 @@ class CaseDetailPage(PrivateLayoutView):
             f"* **Reason:** {self.case['reason'] or 'No reason provided.'}\n\n"
             f"Choose how to handle this deletion:"
         )
-        view = CaseDeleteConfirmationView(
-            interaction.user, self.cog, self.guild, self.case, self.term, body, title
+        async def do_delete():
+            await self.cog.execute_case_delete(interaction, self.guild, self.case, reverse=True)
+
+        view = DestructiveConfirmationView(
+            user=interaction.user,
+            timeout=60.0,
+            title_text=title,
+            body_text=body,
+            on_confirmation_callback=do_delete
         )
         await interaction.response.send_message(view=view, ephemeral=True)
         view.message = await interaction.original_response()
@@ -2965,8 +2795,15 @@ class Moderation(commands.Cog):
             f"Choose how to handle this deletion:"
         )
 
-        view = CaseDeleteConfirmationView(
-            interaction.user, self, interaction.guild, case, term, body, title
+        async def do_delete():
+            await self.execute_case_delete(interaction, interaction.guild, case, reverse=True)
+
+        view = DestructiveConfirmationView(
+            user=interaction.user,
+            timeout=60.0,
+            title_text=title,
+            body_text=body,
+            on_confirmation_callback=do_delete
         )
         await interaction.response.send_message(view=view)
         view.message = await interaction.original_response()
@@ -3223,7 +3060,7 @@ class Moderation(commands.Cog):
 
 
 class PendingPunishmentsView(PrivateLayoutView):
-    def __init__(self, user, cog, guild: discord.Guild, pending: list, page: int = 0):
+    def __init__(self, user, cog, guild: discord.Guild, pending: list, page: int = 1):
         super().__init__(user, timeout=None)
         self.cog = cog
         self.guild = guild
@@ -3237,7 +3074,7 @@ class PendingPunishmentsView(PrivateLayoutView):
         container = discord.ui.Container()
         container.add_item(discord.ui.TextDisplay("## Pending Punishments"))
 
-        start = self.page * self.per_page
+        start = (self.page - 1) * self.per_page
         end = start + self.per_page
         current_pending = self.pending[start:end]
         if not current_pending:
@@ -3267,14 +3104,16 @@ class PendingPunishmentsView(PrivateLayoutView):
             container.add_item(resolve_row)
 
         nav_row = discord.ui.ActionRow()
-        prev_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page == 0)
+        prev_btn = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.primary, disabled=self.page <= 1)
         prev_btn.callback = self.prev_page
+        page_btn = discord.ui.Button(label=f"Page {self.page} of {self.total_pages}", style=discord.ButtonStyle.secondary, disabled=self.total_pages <= 1)
+        page_btn.callback = self.go_to_page
         next_btn = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.primary,
-                                     disabled=self.page >= self.total_pages - 1)
+                                     disabled=self.page >= self.total_pages)
         next_btn.callback = self.next_page
         nav_row.add_item(prev_btn)
+        nav_row.add_item(page_btn)
         nav_row.add_item(next_btn)
-        container.add_item(discord.ui.TextDisplay(f"-# Page {self.page + 1} of {self.total_pages}"))
         container.add_item(discord.ui.Separator())
 
         container.add_item(nav_row)
@@ -3293,6 +3132,9 @@ class PendingPunishmentsView(PrivateLayoutView):
         await self.build_layout()
         await interaction.edit_original_response(view=self)
 
+    async def go_to_page(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GoToPageModal(self, self.total_pages))
+
     def make_remove_callback(self, pending_id: int):
         async def callback(interaction: discord.Interaction):
             await interaction.response.defer()
@@ -3303,9 +3145,9 @@ class PendingPunishmentsView(PrivateLayoutView):
                 await interaction.edit_original_response(view=self)
 
             else:
-                self.total_pages = (len(self.pending) - 1) // self.per_page + 1
-                if self.page >= self.total_pages:
-                    self.page = self.total_pages - 1
+                self.total_pages = max(1, (len(self.pending) - 1) // self.per_page + 1)
+                if self.page > self.total_pages:
+                    self.page = self.total_pages
                 await self.build_layout()
                 await interaction.edit_original_response(view=self)
 

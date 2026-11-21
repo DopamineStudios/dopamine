@@ -445,7 +445,7 @@ class SkullboardCog(commands.Cog):
                 return
 
             dynamic_emoji = self.get_skull_emoji(total_count)
-            content_str = f"{dynamic_emoji} **{total_count}** | {msg.channel.mention}"
+            content_str = f"{dynamic_emoji} **{total_count}** | {msg.author.mention}"
 
             if existing_ids:
                 status_id, fwd_id = existing_ids
@@ -570,7 +570,7 @@ class SkullboardCog(commands.Cog):
         skull_react = next((r for r in ref.reactions if str(r.emoji) == self.SKULL_EMOJI), None)
         count = skull_react.count if skull_react else 1
 
-        content_str = f"💀 **{count}** | {ref.channel.mention}"
+        content_str = f"💀 **{count}** | {ref.author.mention}"
         channel = self.bot.get_channel(sb_id) or await self.bot.fetch_channel(sb_id)
         status_msg = await channel.send(content=content_str)
         fwd_msg = await ref.forward(destination=channel)
