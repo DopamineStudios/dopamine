@@ -352,6 +352,10 @@ class FeatureBrowserPage(PrivateLayoutView):
         self.build_layout()
         await interaction.response.edit_message(view=self)
 
+    async def _goto(self, interaction: discord.Interaction):
+        total = max(1, (len(self.features) + self.per_page - 1) // self.per_page)
+        await interaction.response.send_modal(DataGoToModal(self, total))
+
     async def _next(self, interaction: discord.Interaction):
         self.page += 1
         self.build_layout()
