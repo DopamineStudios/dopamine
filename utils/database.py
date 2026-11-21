@@ -538,6 +538,11 @@ class DatabaseManager:
                 position INTEGER NOT NULL,
                 PRIMARY KEY (alert_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS alert_reminded (
+                alert_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                PRIMARY KEY (alert_id, user_id)
+            );
 
             -- afk.py tables
             CREATE TABLE IF NOT EXISTS afk_users (
