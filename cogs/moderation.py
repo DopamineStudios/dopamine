@@ -1155,7 +1155,7 @@ class CaseUserHistoryPage(PrivateLayoutView):
 
         if self.parent is not None:
             container.add_item(discord.ui.Separator())
-            back_btn = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary)
+            back_btn = discord.ui.Button(emoji=self.cog.bot.back_emoji, label="Back", style=discord.ButtonStyle.secondary)
             back_btn.callback = self.back_callback
             container.add_item(discord.ui.ActionRow(back_btn))
 
